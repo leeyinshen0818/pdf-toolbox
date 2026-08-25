@@ -118,6 +118,19 @@ QWidget#PreviewWidget {
     border-radius: 8px;
 }
 
+QScrollArea#SettingsScroll {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea#SettingsScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QFrame#SettingsPanel {
+    min-width: 350px;
+}
+
 QLabel#PanelHeading {
     color: #1f2328;
     font-size: 14px;
@@ -135,13 +148,68 @@ QComboBox {
     border: 1px solid #d0d7de;
     border-radius: 6px;
     color: #24292f;
-    min-height: 30px;
-    padding: 4px 8px;
+    min-height: 34px;
+    padding: 4px 10px;
+}
+
+QComboBox QAbstractItemView,
+QListView#ComboPopup {
+    background: #ffffff;
+    color: #24292f;
+    border: 1px solid #cfd7e2;
+    selection-background-color: #edf4fd;
+    selection-color: #163b66;
+    outline: 0;
+}
+
+QComboBox QAbstractItemView::item,
+QListView#ComboPopup::item {
+    min-height: 28px;
+    color: #24292f;
+    padding: 5px 8px;
+    background: #ffffff;
+}
+
+QComboBox QAbstractItemView::item:selected,
+QListView#ComboPopup::item:selected {
+    background: #edf4fd;
+    color: #163b66;
 }
 
 QComboBox:disabled {
-    color: #9aa3af;
+    color: #596575;
     background: #f1f3f6;
+}
+
+QPushButton#IconButton {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 4px;
+}
+
+QPushButton#IconButton:hover:enabled {
+    background: #f0f4f9;
+    border-color: #d8e0ea;
+}
+
+QPushButton#PresetButton {
+    text-align: center;
+    color: #24292f;
+    min-height: 34px;
+    padding: 8px 8px;
+    background: #ffffff;
+}
+
+QPushButton#PresetButton:checked {
+    background: #eaf1fb;
+    border-color: #8fb3df;
+    color: #163b66;
+    font-weight: 600;
+}
+
+QPushButton#PresetButton:disabled {
+    color: #6f7a86;
+    background: #f5f7fa;
 }
 
 QFrame#Divider {

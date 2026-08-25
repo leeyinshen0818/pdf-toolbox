@@ -220,30 +220,16 @@ def test_transparent_png_is_flattened_onto_white(tmp_path: Path) -> None:
         assert_close_color(sample_page(document[0], 0.75), (255, 255, 255))
 
 
-def test_flip_correction_is_applied_to_export(tmp_path: Path) -> None:
-    image = make_split_image(tmp_path / "split.png")
-    output = tmp_path / "flipped.pdf"
+def test_tone_correction_is_applied_to_export(tmp_path: Path) -> None:
+    image = make_rgb(tmp_path / "dim.png", size=(100, 100), color=(90, 90, 90))
+    output = tmp_path / "bright.pdf"
     collection = collection_for([image])
-    collection.update_corrections(image, CorrectionSettings(flip_horizontal=True))
+    collection.update_corrections(image, CorrectionSettings(tone=TonePreset.BRIGHT_20))
 
     PdfExporter().export(collection.entries, output)
 
     with pymupdf.open(output) as document:
-        assert_close_color(sample_page(document[0], 0.25), (0, 0, 255))
-        assert_close_color(sample_page(document[0], 0.75), (255, 0, 0))
-
-
-def test_rotate_correction_changes_fit_page_geometry(tmp_path: Path) -> None:
-    image = make_rgb(tmp_path / "wide.png", size=(300, 100))
-    output = tmp_path / "rotated.pdf"
-    collection = collection_for([image])
-    collection.update_corrections(image, CorrectionSettings(rotation_degrees=90))
-
-    PdfExporter().export(collection.entries, output)
-
-    with pymupdf.open(output) as document:
-        assert document[0].rect.height > document[0].rect.width
-        assert embedded_image_size(document[0]) == (100, 300)
+        assert sample_page(document[0], 0.5)[0] > 90
 
 
 def test_original_source_file_is_not_modified_by_corrections(tmp_path: Path) -> None:
@@ -254,7 +240,6 @@ def test_original_source_file_is_not_modified_by_corrections(tmp_path: Path) -> 
     collection.update_corrections(
         image,
         CorrectionSettings(
-            flip_vertical=True,
             sharpness=SharpnessPreset.SHARPER,
             tone=TonePreset.STRONG,
         ),
