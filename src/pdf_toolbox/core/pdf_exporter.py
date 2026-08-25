@@ -7,10 +7,12 @@ import tempfile
 from typing import Callable, Iterable
 
 import pymupdf
-from PIL import Image, ImageOps
+from PIL import Image
 
+from pdf_toolbox.core.image_corrections import CorrectionSettings, apply_corrections, flatten_to_white
 from pdf_toolbox.core.image_collection import ImageEntry
 from pdf_toolbox.core.image_validation import ImageValidationError, validate_image_file
+from pdf_toolbox.core.pdf_geometry import ExportSettings, calculate_page_layout
 
 
 class PdfExportError(Exception):
@@ -46,6 +48,7 @@ class PdfExporter:
         entries: Iterable[ImageEntry],
         output_path: str | Path,
         *,
+        settings: ExportSettings | None = None,
         overwrite: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> Path:
@@ -70,13 +73,17 @@ class PdfExporter:
 
         temp_path: Path | None = None
         document = pymupdf.open()
+        export_settings = settings or ExportSettings()
 
         try:
             for index, entry in enumerate(ordered_entries, start=1):
-                image_bytes, width, height = self._prepare_image(entry.path)
-                page = document.new_page(width=width, height=height)
+                image_bytes, width, height = self._prepare_image(entry.path, entry.corrections)
+                layout = calculate_page_layout(width, height, export_settings)
+                page = document.new_page(width=layout.page_size.width, height=layout.page_size.height)
+                target = layout.image_rect
+                target_rect = pymupdf.Rect(target.x0, target.y0, target.x1, target.y1)
                 page.draw_rect(page.rect, color=None, fill=(1, 1, 1), overlay=False)
-                page.insert_image(page.rect, stream=image_bytes)
+                page.insert_image(target_rect, stream=image_bytes)
 
                 if progress_callback is not None:
                     progress_callback(index, len(ordered_entries))
@@ -108,11 +115,11 @@ class PdfExporter:
                 except OSError:
                     pass
 
-    def _prepare_image(self, path: Path) -> tuple[bytes, int, int]:
+    def _prepare_image(self, path: Path, corrections: CorrectionSettings | None = None) -> tuple[bytes, int, int]:
         try:
             with Image.open(path) as image:
-                oriented = ImageOps.exif_transpose(image)
-                rgb_image = self._flatten_to_white(oriented)
+                corrected = apply_corrections(image, corrections or CorrectionSettings())
+                rgb_image = flatten_to_white(corrected)
                 width, height = rgb_image.size
 
                 if width <= 0 or height <= 0:
@@ -125,15 +132,3 @@ class PdfExporter:
             raise
         except Exception as exc:
             raise PdfExportError(f"Could not prepare {path.name} for export.") from exc
-
-    def _flatten_to_white(self, image: Image.Image) -> Image.Image:
-        if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
-            rgba = image.convert("RGBA")
-            background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-            background.alpha_composite(rgba)
-            return background.convert("RGB")
-
-        if image.mode != "RGB":
-            return image.convert("RGB")
-
-        return image.copy()

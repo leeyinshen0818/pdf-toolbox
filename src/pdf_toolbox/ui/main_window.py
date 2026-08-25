@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
+from pdf_toolbox.ui.styles import APP_STYLE
 
 
 class MainWindow(QMainWindow):
@@ -22,6 +23,7 @@ class MainWindow(QMainWindow):
         self.resize(1040, 720)
 
         root = QWidget()
+        root.setObjectName("Root")
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -36,6 +38,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stack, 1)
 
         self.setCentralWidget(root)
+        self.setStyleSheet(APP_STYLE)
 
     def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
@@ -49,14 +52,17 @@ class MainWindow(QMainWindow):
         title.setObjectName("SidebarTitle")
 
         image_to_pdf = QPushButton("Image -> PDF")
+        image_to_pdf.setObjectName("NavButton")
         image_to_pdf.setCheckable(True)
         image_to_pdf.setChecked(True)
         image_to_pdf.clicked.connect(lambda: self.stack.setCurrentIndex(0))
 
         pdf_to_image = QPushButton("PDF -> Image")
+        pdf_to_image.setObjectName("NavButton")
         pdf_to_image.setEnabled(False)
 
         organizer = QPushButton("PDF Organizer")
+        organizer.setObjectName("NavButton")
         organizer.setEnabled(False)
 
         layout.addWidget(title)
@@ -65,38 +71,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(pdf_to_image)
         layout.addWidget(organizer)
         layout.addStretch(1)
-
-        sidebar.setStyleSheet(
-            """
-            QFrame#Sidebar {
-                background: #f3f4f6;
-                border-right: 1px solid #d8dee7;
-            }
-            QLabel#SidebarTitle {
-                color: #1f2937;
-                font-size: 18px;
-                font-weight: 700;
-            }
-            QPushButton {
-                border: 1px solid #d0d7e2;
-                border-radius: 6px;
-                color: #1f2937;
-                padding: 10px 12px;
-                text-align: left;
-                background: #ffffff;
-            }
-            QPushButton:checked {
-                background: #0f766e;
-                border-color: #0f766e;
-                color: #ffffff;
-                font-weight: 600;
-            }
-            QPushButton:disabled {
-                color: #8b95a5;
-                background: #eef1f5;
-            }
-            """
-        )
 
         return sidebar
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
+from pdf_toolbox.core.image_corrections import CorrectionSettings
 from pdf_toolbox.core.image_validation import ImageInfo, ImageValidationError, validate_image_file
 
 
@@ -15,6 +16,7 @@ class ImageEntry:
     width: int
     height: int
     format: str
+    corrections: CorrectionSettings = CorrectionSettings()
 
     @classmethod
     def from_info(cls, info: ImageInfo) -> "ImageEntry":
@@ -85,6 +87,14 @@ class ImageCollection:
         keys_to_remove = {image_key(path) for path in paths}
         self._entries = [entry for entry in self._entries if image_key(entry.path) not in keys_to_remove]
         self._keys = {image_key(entry.path) for entry in self._entries}
+
+    def update_corrections(self, path: str | Path, corrections: CorrectionSettings) -> None:
+        key = image_key(path)
+        for index, entry in enumerate(self._entries):
+            if image_key(entry.path) == key:
+                self._entries[index] = replace(entry, corrections=corrections.normalized())
+                return
+        raise KeyError(f"Image is not in the collection: {path}")
 
     def clear(self) -> None:
         self._entries.clear()
