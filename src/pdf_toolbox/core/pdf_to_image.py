@@ -66,6 +66,18 @@ class PdfInfo:
 
 
 @dataclass(frozen=True)
+class PdfPageRef:
+    source_path: Path
+    source_filename: str
+    page_index: int
+    page_count: int
+
+    @property
+    def label(self) -> str:
+        return f"{self.source_filename} - Page {self.page_index + 1}"
+
+
+@dataclass(frozen=True)
 class PdfImageExportSettings:
     output_format: OutputFormat = OutputFormat.JPG
     dpi: DpiPreset = DpiPreset.HIGH
@@ -126,37 +138,63 @@ class PdfToImageService:
         cancel_callback: CancelCallback | None = None,
     ) -> tuple[Path, ...]:
         pdf_path = Path(path)
+        info = self.load_pdf_info(pdf_path)
+        refs = tuple(
+            PdfPageRef(
+                source_path=info.path,
+                source_filename=info.filename,
+                page_index=page_index,
+                page_count=info.page_count,
+            )
+            for page_index in page_indices
+        )
+        return self.export_page_refs(
+            refs,
+            output_folder,
+            settings,
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
+
+    def export_page_refs(
+        self,
+        page_refs: Iterable[PdfPageRef],
+        output_folder: str | Path,
+        settings: PdfImageExportSettings,
+        *,
+        progress_callback: ProgressCallback | None = None,
+        cancel_callback: CancelCallback | None = None,
+    ) -> tuple[Path, ...]:
         output_dir = Path(output_folder)
         if not output_dir.exists():
             raise PdfRenderError("Output folder does not exist.")
         if not output_dir.is_dir():
             raise PdfRenderError("Output path is not a folder.")
 
-        info = self.load_pdf_info(pdf_path)
-        pages = tuple(page_indices)
-        if not pages:
-            raise PdfRenderError("Select at least one page before converting.")
+        refs = tuple(page_refs)
+        if not refs:
+            raise PdfRenderError("No pages available to convert.")
 
-        for index in pages:
-            if index < 0 or index >= info.page_count:
-                raise PdfRenderError(f"Page {index + 1} is outside the PDF page range.")
+        for ref in refs:
+            if ref.page_index < 0 or ref.page_index >= ref.page_count:
+                raise PdfRenderError(f"Page {ref.page_index + 1} is outside the PDF page range.")
 
         completed: list[Path] = []
-        total = len(pages)
-        stem = safe_filename_stem(pdf_path.stem)
+        total = len(refs)
         output_format = OutputFormat(settings.output_format)
 
-        for done, page_index in enumerate(pages, start=1):
+        for done, ref in enumerate(refs, start=1):
             if cancel_callback is not None and cancel_callback():
                 raise ConversionCancelled(tuple(completed))
 
+            stem = safe_filename_stem(Path(ref.source_filename).stem)
             target = collision_safe_path(
                 output_dir,
-                page_output_name(stem, page_index, info.page_count, output_format),
+                page_output_name(stem, ref.page_index, ref.page_count, output_format),
             )
 
             try:
-                pixmap = self._render_page_pixmap(pdf_path, page_index, DpiPreset(settings.dpi).dpi)
+                pixmap = self._render_page_pixmap(Path(ref.source_path), ref.page_index, DpiPreset(settings.dpi).dpi)
                 self._save_pixmap_atomic(pixmap, target, settings)
             except Exception as exc:
                 if target.exists():
@@ -164,11 +202,11 @@ class PdfToImageService:
                         target.unlink()
                     except OSError:
                         pass
-                raise PdfRenderError(f"Failed to render page {page_index + 1}.") from exc
+                raise PdfRenderError(f"Failed to render {ref.source_filename} page {ref.page_index + 1}.") from exc
 
             completed.append(target)
             if progress_callback is not None:
-                progress_callback(done, total, page_index, target)
+                progress_callback(done, total, ref.page_index, target)
 
         return tuple(completed)
 
@@ -202,7 +240,13 @@ class PdfToImageService:
         try:
             image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
             if output_format == OutputFormat.JPG:
-                image.save(temp_path, format="JPEG", quality=JpgQuality(settings.jpg_quality).quality, optimize=True)
+                image.save(
+                    temp_path,
+                    format="JPEG",
+                    quality=JpgQuality(settings.jpg_quality).quality,
+                    optimize=True,
+                    subsampling=0,
+                )
             else:
                 image.save(temp_path, format="PNG")
             temp_path.replace(target)

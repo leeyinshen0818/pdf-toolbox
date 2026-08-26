@@ -42,6 +42,7 @@ from pdf_toolbox.core.pdf_geometry import (
     PageSizeMode,
     calculate_page_layout,
 )
+from pdf_toolbox.core.output_location import open_output_location
 
 
 PATH_ROLE = Qt.UserRole + 1
@@ -266,6 +267,7 @@ class ImageToPdfPage(QWidget):
         self.preview_cache: dict[tuple[str, int, tuple[str, str]], tuple[QPixmap, tuple[int, int]]] = {}
         self.sharpness_buttons: dict[SharpnessPreset, QPushButton] = {}
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
+        self.open_output_location = open_output_location
 
         self._build_ui()
         self._update_state()
@@ -341,7 +343,8 @@ class ImageToPdfPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setFixedWidth(370)
+        scroll.setMinimumWidth(350)
+        scroll.setMaximumWidth(430)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
@@ -598,6 +601,9 @@ class ImageToPdfPage(QWidget):
     def _on_export_finished(self, output_path: str) -> None:
         self._set_exporting(False)
         self.status_label.setText(f"Export complete - {output_path}")
+        result = self.open_output_location(output_path, reveal=True)
+        if not result.success:
+            self.status_label.setText("Export complete, but the output folder could not be opened.")
 
     def _on_export_failed(self, message: str) -> None:
         self._set_exporting(False)

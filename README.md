@@ -14,11 +14,11 @@ Phase 1 implements Image -> PDF:
 
 Phase 2 implements PDF -> Image:
 
-- Import one PDF using the file picker or drag and drop.
+- Import one or more PDFs using the file picker or drag and drop.
 - Preview PDF pages as selectable thumbnails.
 - Export selected pages as JPG or PNG.
 - Choose Standard 150 DPI or High 300 DPI output.
-- Use collision-safe page filenames in the selected output folder.
+- Use a persistent default output folder and collision-safe page filenames.
 
 PDF Organizer is reserved for a future phase.
 

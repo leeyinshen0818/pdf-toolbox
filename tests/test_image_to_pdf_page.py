@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
+from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.image_corrections import CorrectionSettings, SharpnessPreset, TonePreset
 from pdf_toolbox.core.pdf_geometry import MarginPreset, PageOrientation, PageSizeMode
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
@@ -173,3 +174,27 @@ def test_conversion_setting_values_are_populated_and_readable(app: QApplication)
     assert page.page_size_combo.view().model().rowCount() == 3
     assert page.orientation_combo.view().model().rowCount() == 2
     assert page.margin_combo.view().model().rowCount() == 3
+
+
+def test_successful_pdf_export_reveals_output_file(app: QApplication, tmp_path: Path) -> None:
+    page = ImageToPdfPage()
+    output = tmp_path / "result.pdf"
+    output.write_bytes(b"%PDF")
+    calls: list[tuple[Path, bool]] = []
+    page.open_output_location = lambda path, reveal=False: calls.append((Path(path), reveal)) or OpenLocationResult(True)
+
+    page._on_export_finished(str(output))
+
+    assert calls == [(output, True)]
+    assert page.status_label.text() == f"Export complete - {output}"
+
+
+def test_pdf_export_open_failure_does_not_invalidate_export(app: QApplication, tmp_path: Path) -> None:
+    page = ImageToPdfPage()
+    output = tmp_path / "result.pdf"
+    output.write_bytes(b"%PDF")
+    page.open_output_location = lambda _path, reveal=False: OpenLocationResult(False, "blocked")
+
+    page._on_export_finished(str(output))
+
+    assert page.status_label.text() == "Export complete, but the output folder could not be opened."

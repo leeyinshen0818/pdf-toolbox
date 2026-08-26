@@ -13,6 +13,7 @@ from pdf_toolbox.core.pdf_to_image import (
     OutputFormat,
     PdfImageExportSettings,
     PdfLoadError,
+    PdfPageRef,
     PdfRenderError,
     PdfToImageService,
     collision_safe_path,
@@ -75,22 +76,49 @@ def test_encrypted_pdf_handled_gracefully(tmp_path: Path) -> None:
         PdfToImageService().load_pdf_info(pdf)
 
 
-def test_selection_state_defaults_and_actions(tmp_path: Path) -> None:
+def test_state_returns_all_loaded_pages(tmp_path: Path) -> None:
     pdf = make_pdf(tmp_path / "document.pdf", [(72, 72), (72, 72), (72, 72)])
     info = PdfToImageService().load_pdf_info(pdf)
     state = PdfToImageState()
 
     state.load_pdf(info)
-    assert state.ordered_selected_pages() == (0, 1, 2)
+    assert state.page_count == 3
+    assert [ref.page_index for ref in state.all_page_refs()] == [0, 1, 2]
 
-    state.toggle_page(1)
-    assert state.ordered_selected_pages() == (0, 2)
 
-    state.clear_selection()
-    assert state.ordered_selected_pages() == ()
+def test_multiple_pdfs_can_be_loaded_appended_and_duplicates_rejected(tmp_path: Path) -> None:
+    first = make_pdf(tmp_path / "first.pdf", [(72, 72), (72, 72)])
+    second = make_pdf(tmp_path / "second.pdf", [(72, 72)])
+    service = PdfToImageService()
+    state = PdfToImageState()
 
-    state.select_all()
-    assert state.ordered_selected_pages() == (0, 1, 2)
+    assert state.add_pdf(service.load_pdf_info(first))
+    assert state.add_pdf(service.load_pdf_info(second))
+    assert not state.add_pdf(service.load_pdf_info(first))
+
+    refs = state.all_page_refs()
+    assert len(state.loaded_pdfs) == 2
+    assert [(ref.source_filename, ref.page_index) for ref in refs] == [
+        ("first.pdf", 0),
+        ("first.pdf", 1),
+        ("second.pdf", 0),
+    ]
+
+
+def test_all_page_refs_include_every_page_across_documents(tmp_path: Path) -> None:
+    first = make_pdf(tmp_path / "first.pdf", [(72, 72), (72, 72)])
+    second = make_pdf(tmp_path / "second.pdf", [(72, 72), (72, 72)])
+    service = PdfToImageService()
+    state = PdfToImageState()
+    state.add_pdf(service.load_pdf_info(first))
+    state.add_pdf(service.load_pdf_info(second))
+
+    assert [(ref.source_filename, ref.page_index) for ref in state.all_page_refs()] == [
+        ("first.pdf", 0),
+        ("first.pdf", 1),
+        ("second.pdf", 0),
+        ("second.pdf", 1),
+    ]
 
 
 def test_jpg_output_created(tmp_path: Path) -> None:
@@ -178,6 +206,45 @@ def test_multi_page_pdf_converts_in_requested_page_order(tmp_path: Path) -> None
     assert [path.name for path in outputs] == ["report_page_003.png", "report_page_001.png"]
 
 
+def test_page_refs_from_multiple_pdfs_export_with_source_names(tmp_path: Path) -> None:
+    first = make_pdf(tmp_path / "report.pdf", [(72, 72), (72, 72)])
+    second = make_pdf(tmp_path / "invoice.pdf", [(72, 72), (72, 72)])
+    refs = (
+        PdfPageRef(first, "report.pdf", 1, 2),
+        PdfPageRef(second, "invoice.pdf", 0, 2),
+    )
+
+    outputs = PdfToImageService().export_page_refs(
+        refs,
+        tmp_path,
+        PdfImageExportSettings(output_format=OutputFormat.PNG, dpi=DpiPreset.STANDARD),
+    )
+
+    assert [path.name for path in outputs] == ["report_page_002.png", "invoice_page_001.png"]
+    assert all(path.exists() for path in outputs)
+
+
+def test_same_basename_pdfs_use_collision_safe_names(tmp_path: Path) -> None:
+    first_dir = tmp_path / "one"
+    second_dir = tmp_path / "two"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = make_pdf(first_dir / "report.pdf", [(72, 72)])
+    second = make_pdf(second_dir / "report.pdf", [(72, 72)])
+    refs = (
+        PdfPageRef(first, "report.pdf", 0, 1),
+        PdfPageRef(second, "report.pdf", 0, 1),
+    )
+
+    outputs = PdfToImageService().export_page_refs(
+        refs,
+        tmp_path,
+        PdfImageExportSettings(output_format=OutputFormat.JPG, dpi=DpiPreset.STANDARD),
+    )
+
+    assert [path.name for path in outputs] == ["report_page_001.jpg", "report_page_001_1.jpg"]
+
+
 def test_automatic_page_naming_and_zero_padding() -> None:
     assert page_output_name("report", 0, 3, OutputFormat.JPG) == "report_page_001.jpg"
     assert page_output_name("report", 249, 250, OutputFormat.PNG) == "report_page_250.png"
@@ -210,7 +277,7 @@ def test_existing_files_are_not_silently_overwritten(tmp_path: Path) -> None:
     assert outputs[0].name == "report_page_001_1.jpg"
 
 
-def test_selected_pages_only_are_exported(tmp_path: Path) -> None:
+def test_explicit_page_indices_are_exported(tmp_path: Path) -> None:
     pdf = make_pdf(tmp_path / "report.pdf", [(72, 72), (72, 72), (72, 72)])
 
     outputs = PdfToImageService().export_pages(
@@ -227,7 +294,7 @@ def test_selected_pages_only_are_exported(tmp_path: Path) -> None:
 def test_empty_page_selection_rejected(tmp_path: Path) -> None:
     pdf = make_pdf(tmp_path / "report.pdf", [(72, 72)])
 
-    with pytest.raises(PdfRenderError, match="Select at least one page"):
+    with pytest.raises(PdfRenderError, match="No pages available"):
         PdfToImageService().export_pages(pdf, [], tmp_path, PdfImageExportSettings())
 
 

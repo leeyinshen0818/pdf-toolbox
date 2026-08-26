@@ -72,6 +72,18 @@ QPushButton#PrimaryButton:hover:enabled {
     background: #183f69;
 }
 
+QPushButton#SecondaryActionButton {
+    background: #ffffff;
+    border-color: #cfd7e2;
+    color: #1f2328;
+    font-weight: 500;
+}
+
+QPushButton#SecondaryActionButton:hover:enabled {
+    background: #f3f6fa;
+    border-color: #aebaca;
+}
+
 QListWidget#ImageList {
     border: 1px solid #dfe4ea;
     border-radius: 8px;

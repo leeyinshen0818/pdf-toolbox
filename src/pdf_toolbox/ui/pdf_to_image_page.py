@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QObject, QRect, QSettings, QSize, QStandardPaths, Qt, QThread, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -16,12 +16,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.core.pdf_to_image import (
     ConversionCancelled,
     DpiPreset,
@@ -29,13 +31,17 @@ from pdf_toolbox.core.pdf_to_image import (
     OutputFormat,
     PdfImageExportSettings,
     PdfLoadError,
-    PdfRenderError,
+    PdfPageRef,
     PdfToImageService,
 )
-from pdf_toolbox.core.pdf_to_image_state import PdfToImageState
+from pdf_toolbox.core.pdf_to_image_state import PdfToImageState, pdf_key
 
 
 PAGE_INDEX_ROLE = Qt.UserRole + 10
+SOURCE_KEY_ROLE = Qt.UserRole + 11
+OUTPUT_FOLDER_SETTING = "pdf_to_image/output_folder"
+THUMBNAIL_ICON_SIZE = QSize(140, 180)
+THUMBNAIL_PAGE_MAX_SIZE = QSize(122, 158)
 
 
 class PdfDropArea(QFrame):
@@ -53,7 +59,7 @@ class PdfDropArea(QFrame):
         title = QLabel("Drop a PDF here")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
-        hint = QLabel("One PDF at a time is supported.")
+        hint = QLabel("You can add multiple PDF files.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
 
@@ -91,10 +97,10 @@ class PageThumbnailList(QListWidget):
         self.setViewMode(QListWidget.IconMode)
         self.setResizeMode(QListWidget.Adjust)
         self.setMovement(QListWidget.Static)
-        self.setSelectionMode(QListWidget.MultiSelection)
+        self.setSelectionMode(QListWidget.NoSelection)
         self.setWrapping(True)
         self.setSpacing(10)
-        self.setIconSize(QSize(122, 158))
+        self.setIconSize(THUMBNAIL_ICON_SIZE)
         self.setUniformItemSizes(True)
 
     def dragEnterEvent(self, event) -> None:
@@ -118,51 +124,15 @@ class PageThumbnailList(QListWidget):
         super().dropEvent(event)
 
 
-class PdfPreviewWidget(QFrame):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("PreviewWidget")
-        self.setMinimumHeight(300)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        self.preview_label = QLabel("Select a page to preview")
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setObjectName("SubtleText")
-        layout.addWidget(self.preview_label, 1)
-        self._pixmap: QPixmap | None = None
-
-    def set_pixmap(self, pixmap: QPixmap | None) -> None:
-        self._pixmap = pixmap
-        self._refresh()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._refresh()
-
-    def _refresh(self) -> None:
-        if self._pixmap is None:
-            self.preview_label.setText("Select a page to preview")
-            self.preview_label.setPixmap(QPixmap())
-            return
-        scaled = self._pixmap.scaled(
-            self.preview_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self.preview_label.setText("")
-        self.preview_label.setPixmap(scaled)
-
-
 class ThumbnailWorker(QObject):
-    thumbnail_ready = Signal(int, bytes)
+    thumbnail_ready = Signal(str, int, bytes)
+    thumbnail_failed = Signal(str, int, str)
     finished = Signal()
     failed = Signal(str)
 
-    def __init__(self, path: Path, page_count: int) -> None:
+    def __init__(self, requests: tuple[tuple[str, Path, int], ...]) -> None:
         super().__init__()
-        self.path = path
-        self.page_count = page_count
+        self.requests = requests
         self.service = PdfToImageService()
         self.cancelled = False
 
@@ -170,36 +140,16 @@ class ThumbnailWorker(QObject):
         self.cancelled = True
 
     def run(self) -> None:
-        try:
-            for page_index in range(self.page_count):
-                if self.cancelled:
-                    break
-                data = self.service.render_page_png_bytes(self.path, page_index, dpi=42)
-                self.thumbnail_ready.emit(page_index, data)
-        except Exception as exc:
-            self.failed.emit(str(exc))
-            return
+        for source_key, path, page_index in self.requests:
+            if self.cancelled:
+                break
+            try:
+                data = self.service.render_page_png_bytes(path, page_index, dpi=72)
+            except Exception as exc:
+                self.thumbnail_failed.emit(source_key, page_index, str(exc))
+                continue
+            self.thumbnail_ready.emit(source_key, page_index, data)
         self.finished.emit()
-
-
-class PreviewWorker(QObject):
-    preview_ready = Signal(int, int, bytes)
-    failed = Signal(int, int, str)
-
-    def __init__(self, request_id: int, path: Path, page_index: int) -> None:
-        super().__init__()
-        self.request_id = request_id
-        self.path = path
-        self.page_index = page_index
-        self.service = PdfToImageService()
-
-    def run(self) -> None:
-        try:
-            data = self.service.render_page_png_bytes(self.path, self.page_index, dpi=110)
-        except Exception as exc:
-            self.failed.emit(self.request_id, self.page_index, str(exc))
-            return
-        self.preview_ready.emit(self.request_id, self.page_index, data)
 
 
 class ConversionWorker(QObject):
@@ -210,14 +160,12 @@ class ConversionWorker(QObject):
 
     def __init__(
         self,
-        path: Path,
-        page_indices: tuple[int, ...],
+        page_refs: tuple[PdfPageRef, ...],
         output_folder: Path,
         settings: PdfImageExportSettings,
     ) -> None:
         super().__init__()
-        self.path = path
-        self.page_indices = page_indices
+        self.page_refs = page_refs
         self.output_folder = output_folder
         self.settings = settings
         self.service = PdfToImageService()
@@ -228,9 +176,8 @@ class ConversionWorker(QObject):
 
     def run(self) -> None:
         try:
-            paths = self.service.export_pages(
-                self.path,
-                self.page_indices,
+            paths = self.service.export_page_refs(
+                self.page_refs,
                 self.output_folder,
                 self.settings,
                 progress_callback=self._on_progress,
@@ -255,14 +202,13 @@ class PdfToImagePage(QWidget):
         self.state = PdfToImageState()
         self.thumbnail_thread: QThread | None = None
         self.thumbnail_worker: ThumbnailWorker | None = None
-        self.preview_threads: list[QThread] = []
-        self.preview_request_id = 0
-        self.preview_cache: dict[int, QPixmap] = {}
+        self.thumbnail_cache: dict[tuple[str, int], QPixmap] = {}
         self.conversion_thread: QThread | None = None
         self.conversion_worker: ConversionWorker | None = None
-        self._syncing_selection = False
+        self.open_output_location = open_output_location
 
         self._build_ui()
+        self._load_output_folder_setting()
         self._update_state()
 
     def _build_ui(self) -> None:
@@ -272,7 +218,7 @@ class PdfToImagePage(QWidget):
 
         title = QLabel("PDF -> Image")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #1f2328;")
-        subtitle = QLabel("Convert selected PDF pages into JPG or PNG images.")
+        subtitle = QLabel("Convert every page from uploaded PDFs into JPG or PNG images.")
         subtitle.setObjectName("SubtleText")
 
         toolbar = QHBoxLayout()
@@ -295,33 +241,17 @@ class PdfToImagePage(QWidget):
         self.pdf_info_label = QLabel("No PDF loaded")
         self.pdf_info_label.setObjectName("SubtleText")
 
-        selection_bar = QHBoxLayout()
-        self.select_all_button = QPushButton("Select All")
-        self.clear_selection_button = QPushButton("Clear Selection")
-        self.select_all_button.clicked.connect(self._select_all_pages)
-        self.clear_selection_button.clicked.connect(self._clear_page_selection)
-        selection_bar.addWidget(self.select_all_button)
-        selection_bar.addWidget(self.clear_selection_button)
-        selection_bar.addStretch(1)
-
         self.stack = QStackedWidget()
         self.empty_state = PdfDropArea()
         self.empty_state.files_dropped.connect(self._add_pdf_paths)
         self.thumbnail_list = PageThumbnailList()
         self.thumbnail_list.files_dropped.connect(self._add_pdf_paths)
-        self.thumbnail_list.itemSelectionChanged.connect(self._on_page_selection_changed)
-        self.thumbnail_list.itemClicked.connect(self._on_page_clicked)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.thumbnail_list)
-        self.stack.setMinimumHeight(230)
-        self.stack.setMaximumHeight(350)
-
-        self.preview = PdfPreviewWidget()
+        self.stack.setMinimumHeight(420)
 
         main_area.addWidget(self.pdf_info_label)
-        main_area.addLayout(selection_bar)
-        main_area.addWidget(self.stack)
-        main_area.addWidget(self.preview, 1)
+        main_area.addWidget(self.stack, 1)
 
         content.addLayout(main_area, 1)
         content.addWidget(self._build_settings_panel())
@@ -341,10 +271,18 @@ class PdfToImagePage(QWidget):
         layout.addLayout(content, 1)
         layout.addWidget(status_frame)
 
-    def _build_settings_panel(self) -> QFrame:
+    def _build_settings_panel(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setObjectName("SettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setMinimumWidth(340)
+        scroll.setMaximumWidth(430)
+
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setFixedWidth(350)
+        panel.setMinimumWidth(330)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
@@ -361,23 +299,30 @@ class PdfToImagePage(QWidget):
         self.dpi_combo.setCurrentIndex(self.dpi_combo.findData(DpiPreset.HIGH.value))
         layout.addLayout(self._labeled_control("Resolution", self.dpi_combo))
 
+        self.jpg_quality_container = QWidget()
         self.jpg_quality_combo = self._combo(JpgQuality)
-        self.jpg_quality_combo.setCurrentIndex(self.jpg_quality_combo.findData(JpgQuality.HIGH.value))
-        layout.addLayout(self._labeled_control("JPG Quality", self.jpg_quality_combo))
+        jpg_quality_layout = self._labeled_control("JPG Quality", self.jpg_quality_combo)
+        self.jpg_quality_combo.setCurrentIndex(self.jpg_quality_combo.findData(JpgQuality.MAXIMUM.value))
+        self.jpg_quality_container.setLayout(jpg_quality_layout)
+        layout.addWidget(self.jpg_quality_container)
 
         output_label = QLabel("Output Folder")
         output_label.setObjectName("FieldLabel")
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
         self.output_folder_edit.setPlaceholderText("Choose a folder")
-        browse_button = QPushButton("Browse")
-        browse_button.clicked.connect(self._choose_output_folder)
+        self.browse_output_folder_button = QPushButton("Browse")
+        self.browse_output_folder_button.clicked.connect(self._choose_output_folder)
+        self.set_default_folder_button = QPushButton("Set as Default Folder")
+        self.set_default_folder_button.setObjectName("SecondaryActionButton")
+        self.set_default_folder_button.clicked.connect(self._set_default_output_folder)
         output_row = QHBoxLayout()
         output_row.setSpacing(6)
         output_row.addWidget(self.output_folder_edit, 1)
-        output_row.addWidget(browse_button)
+        output_row.addWidget(self.browse_output_folder_button)
         layout.addWidget(output_label)
         layout.addLayout(output_row)
+        layout.addWidget(self.set_default_folder_button)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -386,7 +331,7 @@ class PdfToImagePage(QWidget):
 
         layout.addStretch(1)
 
-        self.convert_button = QPushButton("Convert")
+        self.convert_button = QPushButton("Convert All Pages")
         self.convert_button.setObjectName("PrimaryButton")
         self.convert_button.clicked.connect(self._start_conversion)
         self.cancel_button = QPushButton("Cancel")
@@ -394,7 +339,8 @@ class PdfToImagePage(QWidget):
         layout.addWidget(self.convert_button)
         layout.addWidget(self.cancel_button)
 
-        return panel
+        scroll.setWidget(panel)
+        return scroll
 
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
@@ -419,182 +365,156 @@ class PdfToImagePage(QWidget):
         return layout
 
     def _choose_pdf(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select PDF", "", "PDF files (*.pdf)")
-        if file_path:
-            self._load_pdf(Path(file_path))
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select PDFs", "", "PDF files (*.pdf)")
+        if file_paths:
+            self._add_pdf_paths(file_paths)
 
     def _add_pdf_paths(self, paths: list[str]) -> None:
         pdf_paths = [Path(path) for path in paths if Path(path).suffix.lower() == ".pdf"]
         if not pdf_paths:
             self.status_label.setText("Unsupported file type. Use a PDF file.")
             return
-        self._load_pdf(pdf_paths[0])
+        self._load_pdfs(pdf_paths)
 
-    def _load_pdf(self, path: Path) -> None:
+    def _load_pdfs(self, paths: list[Path]) -> None:
         self._stop_thumbnail_worker()
-        try:
-            info = self.service.load_pdf_info(path)
-        except PdfLoadError as exc:
-            self.status_label.setText(str(exc))
-            QMessageBox.warning(self, "PDF Not Added", str(exc))
-            return
+        added = 0
+        duplicates = 0
+        errors: list[str] = []
 
-        self.state.load_pdf(info)
-        self.preview_cache.clear()
-        self._populate_page_items(info.page_count)
+        for path in paths:
+            try:
+                info = self.service.load_pdf_info(path)
+            except PdfLoadError as exc:
+                errors.append(f"{path.name}: {exc}")
+                continue
+            if not self.state.add_pdf(info):
+                duplicates += 1
+                continue
+            added += 1
+
+        self._populate_page_items()
         self._update_pdf_info()
         self._update_state()
-        self._request_preview(0)
         self._start_thumbnail_worker()
-        self.status_label.setText(f"Loaded {info.filename}.")
 
-    def _populate_page_items(self, page_count: int) -> None:
-        self._syncing_selection = True
+        messages: list[str] = []
+        if added:
+            messages.append(f"Added {added} PDF(s).")
+        if duplicates:
+            messages.append(f"Skipped {duplicates} duplicate PDF(s).")
+        if errors:
+            messages.append(f"Rejected {len(errors)} PDF(s).")
+        self.status_label.setText(" ".join(messages) if messages else "No PDFs added.")
+        if errors:
+            QMessageBox.warning(self, "Some PDFs Were Not Added", "\n".join(errors[:8]))
+
+    def _populate_page_items(self) -> None:
         self.thumbnail_list.clear()
-        placeholder = QPixmap(122, 158)
-        placeholder.fill(Qt.white)
-        for index in range(page_count):
-            item = QListWidgetItem(f"Page {index + 1}")
-            item.setData(PAGE_INDEX_ROLE, index)
-            item.setIcon(placeholder)
-            item.setSizeHint(QSize(146, 194))
-            self.thumbnail_list.addItem(item)
-        self.thumbnail_list.setCurrentRow(0)
-        for index in range(self.thumbnail_list.count()):
-            self.thumbnail_list.item(index).setSelected(True)
-        self._syncing_selection = False
+        placeholder = thumbnail_placeholder("Loading")
+        for document in self.state.loaded_pdfs:
+            for page_index in range(document.info.page_count):
+                item = QListWidgetItem(f"{document.info.filename}\nPage {page_index + 1}")
+                item.setData(SOURCE_KEY_ROLE, document.source_key)
+                item.setData(PAGE_INDEX_ROLE, page_index)
+                item.setIcon(self.thumbnail_cache.get((document.source_key, page_index), placeholder))
+                item.setSizeHint(QSize(184, 230))
+                self.thumbnail_list.addItem(item)
 
-    def _start_thumbnail_worker(self) -> None:
-        if self.state.pdf_info is None:
+    def _start_thumbnail_worker(self, source_keys: list[str] | None = None) -> None:
+        requests = self._thumbnail_requests(source_keys)
+        if not requests:
             return
-        self.thumbnail_thread = QThread(self)
-        self.thumbnail_worker = ThumbnailWorker(self.state.pdf_info.path, self.state.pdf_info.page_count)
-        self.thumbnail_worker.moveToThread(self.thumbnail_thread)
-        self.thumbnail_thread.started.connect(self.thumbnail_worker.run)
-        self.thumbnail_worker.thumbnail_ready.connect(self._on_thumbnail_ready)
-        self.thumbnail_worker.failed.connect(self._on_thumbnail_failed)
-        self.thumbnail_worker.finished.connect(self.thumbnail_thread.quit)
-        self.thumbnail_worker.failed.connect(lambda _message: self.thumbnail_thread.quit())
-        self.thumbnail_thread.finished.connect(self.thumbnail_worker.deleteLater)
-        self.thumbnail_thread.finished.connect(self.thumbnail_thread.deleteLater)
-        self.thumbnail_thread.finished.connect(self._clear_thumbnail_worker)
-        self.thumbnail_thread.start()
+        thread = QThread(self)
+        worker = ThumbnailWorker(requests)
+        self.thumbnail_thread = thread
+        self.thumbnail_worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.thumbnail_ready.connect(self._on_thumbnail_ready)
+        worker.thumbnail_failed.connect(self._on_thumbnail_preview_failed)
+        worker.failed.connect(self._on_thumbnail_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(lambda _message: thread.quit())
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda thread=thread, worker=worker: self._clear_thumbnail_worker(thread, worker))
+        thread.start()
 
     def _stop_thumbnail_worker(self) -> None:
         if self.thumbnail_worker is not None:
             self.thumbnail_worker.cancel()
 
-    def _clear_thumbnail_worker(self) -> None:
-        self.thumbnail_thread = None
-        self.thumbnail_worker = None
+    def _thumbnail_requests(self, source_keys: list[str] | None = None) -> tuple[tuple[str, Path, int], ...]:
+        if not self.state.loaded_pdfs:
+            return ()
+        keys = set(source_keys or [document.source_key for document in self.state.loaded_pdfs])
+        return tuple(
+            (document.source_key, document.info.path, page_index)
+            for document in self.state.loaded_pdfs
+            if document.source_key in keys
+            for page_index in range(document.info.page_count)
+            if (document.source_key, page_index) not in self.thumbnail_cache
+        )
 
-    def _on_thumbnail_ready(self, page_index: int, data: bytes) -> None:
-        pixmap = QPixmap()
-        pixmap.loadFromData(data)
-        item = self._item_for_page(page_index)
+    def _clear_thumbnail_worker(self, thread: QThread, worker: ThumbnailWorker) -> None:
+        if self.thumbnail_thread is thread:
+            self.thumbnail_thread = None
+        if self.thumbnail_worker is worker:
+            self.thumbnail_worker = None
+
+    def _on_thumbnail_ready(self, source_key: str, page_index: int, data: bytes) -> None:
+        pixmap = thumbnail_from_png_bytes(data)
+        self.thumbnail_cache[(source_key, page_index)] = pixmap
+        item = self._item_for_page(source_key, page_index)
         if item is not None:
             item.setIcon(pixmap)
 
+    def _on_thumbnail_preview_failed(self, source_key: str, page_index: int, message: str) -> None:
+        pixmap = thumbnail_placeholder("Preview\nunavailable")
+        self.thumbnail_cache[(source_key, page_index)] = pixmap
+        item = self._item_for_page(source_key, page_index)
+        if item is not None:
+            item.setIcon(pixmap)
+        self.status_label.setText("Some page previews could not be generated, but conversion can continue.")
+
     def _on_thumbnail_failed(self, message: str) -> None:
         self.status_label.setText(message)
-
-    def _on_page_selection_changed(self) -> None:
-        if self._syncing_selection:
-            return
-        self.state.selected_pages = {
-            item.data(PAGE_INDEX_ROLE)
-            for item in self.thumbnail_list.selectedItems()
-        }
-        self._update_state()
-
-    def _on_page_clicked(self, item: QListWidgetItem) -> None:
-        page_index = item.data(PAGE_INDEX_ROLE)
-        self.state.set_active_page(page_index)
-        self._request_preview(page_index)
-
-    def _request_preview(self, page_index: int) -> None:
-        if self.state.pdf_info is None:
-            self.preview.set_pixmap(None)
-            return
-        cached = self.preview_cache.get(page_index)
-        if cached is not None:
-            self.preview.set_pixmap(cached)
-            return
-
-        self.preview_request_id += 1
-        request_id = self.preview_request_id
-        thread = QThread(self)
-        worker = PreviewWorker(request_id, self.state.pdf_info.path, page_index)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.preview_ready.connect(self._on_preview_ready)
-        worker.failed.connect(self._on_preview_failed)
-        worker.preview_ready.connect(lambda _request_id, _page_index, _data: thread.quit())
-        worker.failed.connect(lambda _request_id, _page_index, _message: thread.quit())
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda thread=thread: self._forget_preview_thread(thread))
-        self.preview_threads.append(thread)
-        thread.start()
-
-    def _forget_preview_thread(self, thread: QThread) -> None:
-        if thread in self.preview_threads:
-            self.preview_threads.remove(thread)
-
-    def _on_preview_ready(self, request_id: int, page_index: int, data: bytes) -> None:
-        pixmap = QPixmap()
-        pixmap.loadFromData(data)
-        self.preview_cache[page_index] = pixmap
-        if request_id == self.preview_request_id:
-            self.preview.set_pixmap(pixmap)
-
-    def _on_preview_failed(self, request_id: int, page_index: int, message: str) -> None:
-        if request_id == self.preview_request_id:
-            self.preview.set_pixmap(None)
-            self.status_label.setText(message)
-
-    def _select_all_pages(self) -> None:
-        if self.state.pdf_info is None:
-            return
-        self.state.select_all()
-        self._apply_selection_to_items()
-        self._update_state()
-
-    def _clear_page_selection(self) -> None:
-        self.state.clear_selection()
-        self._apply_selection_to_items()
-        self._update_state()
-
-    def _apply_selection_to_items(self) -> None:
-        self._syncing_selection = True
-        selected = self.state.selected_pages
-        for index in range(self.thumbnail_list.count()):
-            item = self.thumbnail_list.item(index)
-            item.setSelected(item.data(PAGE_INDEX_ROLE) in selected)
-        self._syncing_selection = False
 
     def _choose_output_folder(self) -> None:
         start = str(self.state.output_folder or Path.home())
         folder = QFileDialog.getExistingDirectory(self, "Choose Output Folder", start)
         if not folder:
             return
-        self.state.output_folder = Path(folder)
-        self.output_folder_edit.setText(folder)
+        self._set_output_folder(Path(folder))
+        self.status_label.setText("Output folder selected.")
         self._update_state()
 
-    def _on_format_changed(self) -> None:
-        self.jpg_quality_combo.setEnabled(OutputFormat(self.format_combo.currentData()) == OutputFormat.JPG)
+    def _set_output_folder(self, folder: Path) -> None:
+        self.state.output_folder = folder
+        self.output_folder_edit.setText(str(folder))
+
+    def _set_default_output_folder(self) -> None:
+        if self.state.output_folder is None:
+            self.status_label.setText("Choose an output folder before saving a default.")
+            return
+        self._save_output_folder_setting(self.state.output_folder)
+        self.status_label.setText("Default output folder saved.")
+
+    def _on_format_changed(self, _index: int | None = None) -> None:
+        self.state.output_format = OutputFormat(self.format_combo.currentData())
+        self.jpg_quality_container.setVisible(self.state.output_format == OutputFormat.JPG)
         self._update_state()
 
     def _start_conversion(self) -> None:
-        if self.state.pdf_info is None:
+        if not self.state.loaded_pdfs:
             return
         if self.state.output_folder is None:
             self.status_label.setText("Choose an output folder before converting.")
             return
-        selected_pages = self.state.ordered_selected_pages()
-        if not selected_pages:
-            self.status_label.setText("Select at least one page before converting.")
+        page_refs = self._page_refs_for_conversion()
+        if not page_refs:
+            self.status_label.setText("No pages available to convert.")
             return
 
         settings = PdfImageExportSettings(
@@ -602,15 +522,14 @@ class PdfToImagePage(QWidget):
             dpi=DpiPreset(self.dpi_combo.currentData()),
             jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()),
         )
-        self.progress_bar.setMaximum(len(selected_pages))
+        self.progress_bar.setMaximum(len(page_refs))
         self.progress_bar.setValue(0)
-        self.status_label.setText(f"Converting 0 of {len(selected_pages)} pages...")
+        self.status_label.setText(f"Converting 0 of {len(page_refs)} pages...")
         self._set_converting(True)
 
         self.conversion_thread = QThread(self)
         self.conversion_worker = ConversionWorker(
-            self.state.pdf_info.path,
-            selected_pages,
+            page_refs,
             self.state.output_folder,
             settings,
         )
@@ -642,6 +561,10 @@ class PdfToImagePage(QWidget):
         completed = tuple(paths)
         self._set_converting(False)
         self.status_label.setText(f"Conversion complete - {len(completed)} image(s) saved.")
+        if completed and self.state.output_folder is not None:
+            result = self.open_output_location(self.state.output_folder)
+            if not result.success:
+                self.status_label.setText("Conversion complete, but the output folder could not be opened.")
 
     def _on_conversion_cancelled(self, paths: object) -> None:
         completed = tuple(paths)
@@ -662,60 +585,129 @@ class PdfToImagePage(QWidget):
         self._stop_thumbnail_worker()
         self.state.clear_pdf()
         self.thumbnail_list.clear()
-        self.preview_cache.clear()
-        self.preview.set_pixmap(None)
+        self.thumbnail_cache.clear()
         self.pdf_info_label.setText("No PDF loaded")
         self.progress_bar.setValue(0)
         self.status_label.setText("PDF cleared.")
         self._update_state()
 
     def _update_pdf_info(self) -> None:
-        if self.state.pdf_info is None:
+        if not self.state.loaded_pdfs:
             self.pdf_info_label.setText("No PDF loaded")
             return
-        size_mb = self.state.pdf_info.file_size_bytes / (1024 * 1024)
-        pages = "page" if self.state.pdf_info.page_count == 1 else "pages"
-        self.pdf_info_label.setText(
-            f"{self.state.pdf_info.filename}   |   {self.state.pdf_info.page_count} {pages}   |   {size_mb:.1f} MB"
-        )
+        pdf_count = len(self.state.loaded_pdfs)
+        page_count = sum(document.info.page_count for document in self.state.loaded_pdfs)
+        size_mb = sum(document.info.file_size_bytes for document in self.state.loaded_pdfs) / (1024 * 1024)
+        pdf_label = "PDF" if pdf_count == 1 else "PDFs"
+        page_label = "page" if page_count == 1 else "pages"
+        self.pdf_info_label.setText(f"{pdf_count} {pdf_label}   |   {page_count} {page_label}   |   {size_mb:.1f} MB")
 
     def _update_state(self) -> None:
-        has_pdf = self.state.pdf_info is not None
-        has_selection = bool(self.state.selected_pages)
+        has_pdf = bool(self.state.loaded_pdfs)
+        has_pages = self.state.page_count > 0
         has_output = self.state.output_folder is not None
         converting = self.conversion_thread is not None and self.conversion_thread.isRunning()
         self.stack.setCurrentWidget(self.thumbnail_list if has_pdf else self.empty_state)
         self.clear_button.setEnabled(has_pdf and not converting)
-        self.select_all_button.setEnabled(has_pdf and not converting)
-        self.clear_selection_button.setEnabled(has_pdf and not converting)
-        self.convert_button.setEnabled(has_pdf and has_selection and has_output and not converting)
+        self.convert_button.setEnabled(has_pages and has_output and not converting)
         self.cancel_button.setVisible(converting)
         self.cancel_button.setEnabled(converting)
         self.add_button.setEnabled(not converting)
         self.thumbnail_list.setEnabled(not converting)
         self.format_combo.setEnabled(not converting)
         self.dpi_combo.setEnabled(not converting)
-        self.jpg_quality_combo.setEnabled(not converting and OutputFormat(self.format_combo.currentData()) == OutputFormat.JPG)
+        self.output_folder_edit.setEnabled(not converting)
+        self.browse_output_folder_button.setEnabled(not converting)
+        self.set_default_folder_button.setEnabled(not converting and has_output)
+        self.jpg_quality_container.setVisible(OutputFormat(self.format_combo.currentData()) == OutputFormat.JPG)
+        self.jpg_quality_combo.setEnabled(not converting)
 
         if not has_pdf and not self.status_label.text():
             self.status_label.setText("No PDF loaded.")
 
     def _set_converting(self, converting: bool) -> None:
         self.add_button.setEnabled(not converting)
-        self.clear_button.setEnabled(not converting and self.state.pdf_info is not None)
-        self.select_all_button.setEnabled(not converting and self.state.pdf_info is not None)
-        self.clear_selection_button.setEnabled(not converting and self.state.pdf_info is not None)
+        self.clear_button.setEnabled(not converting and bool(self.state.loaded_pdfs))
         self.convert_button.setVisible(not converting)
         self.cancel_button.setVisible(converting)
         self.cancel_button.setEnabled(converting)
         self.thumbnail_list.setEnabled(not converting)
         self.format_combo.setEnabled(not converting)
         self.dpi_combo.setEnabled(not converting)
-        self.jpg_quality_combo.setEnabled(not converting and OutputFormat(self.format_combo.currentData()) == OutputFormat.JPG)
+        self.jpg_quality_combo.setEnabled(not converting)
+        self.output_folder_edit.setEnabled(not converting)
+        self.browse_output_folder_button.setEnabled(not converting)
+        self.set_default_folder_button.setEnabled(not converting and self.state.output_folder is not None)
 
-    def _item_for_page(self, page_index: int) -> QListWidgetItem | None:
+    def _item_for_page(self, source_key: str, page_index: int) -> QListWidgetItem | None:
         for index in range(self.thumbnail_list.count()):
             item = self.thumbnail_list.item(index)
-            if item.data(PAGE_INDEX_ROLE) == page_index:
+            if item.data(SOURCE_KEY_ROLE) == source_key and item.data(PAGE_INDEX_ROLE) == page_index:
                 return item
         return None
+
+    def _page_refs_for_conversion(self) -> tuple[PdfPageRef, ...]:
+        return self.state.all_page_refs()
+
+    def _load_output_folder_setting(self) -> None:
+        saved = QSettings().value(OUTPUT_FOLDER_SETTING, "", str)
+        folder = Path(saved) if saved else default_output_folder()
+        if not folder.exists():
+            folder = default_output_folder()
+        self._set_output_folder(folder)
+
+    def _save_output_folder_setting(self, folder: Path) -> None:
+        QSettings().setValue(OUTPUT_FOLDER_SETTING, str(folder))
+
+
+def default_output_folder() -> Path:
+    pictures = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
+    if pictures:
+        path = Path(pictures)
+        if path.exists():
+            return path
+    return Path.home()
+
+
+def thumbnail_from_png_bytes(data: bytes) -> QPixmap:
+    source = QPixmap()
+    if not source.loadFromData(data):
+        return thumbnail_placeholder("Preview\nunavailable")
+    return framed_thumbnail(source)
+
+
+def thumbnail_placeholder(text: str) -> QPixmap:
+    canvas = QPixmap(THUMBNAIL_ICON_SIZE)
+    canvas.fill(QColor("#ffffff"))
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.fillRect(canvas.rect(), QColor("#f8fafc"))
+    page_rect = QRect(13, 12, THUMBNAIL_ICON_SIZE.width() - 26, THUMBNAIL_ICON_SIZE.height() - 34)
+    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(0, 0, 0, 14))
+    painter.fillRect(page_rect, QColor("#ffffff"))
+    painter.setPen(QPen(QColor("#d7dee8"), 1))
+    painter.drawRect(page_rect)
+    painter.setPen(QColor("#7a8491"))
+    painter.drawText(page_rect, Qt.AlignCenter, text)
+    painter.end()
+    return canvas
+
+
+def framed_thumbnail(source: QPixmap) -> QPixmap:
+    canvas = QPixmap(THUMBNAIL_ICON_SIZE)
+    canvas.fill(QColor("#ffffff"))
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    painter.fillRect(canvas.rect(), QColor("#f8fafc"))
+
+    scaled = source.scaled(THUMBNAIL_PAGE_MAX_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    x = (THUMBNAIL_ICON_SIZE.width() - scaled.width()) // 2
+    y = (THUMBNAIL_ICON_SIZE.height() - scaled.height()) // 2
+    page_rect = QRect(x, y, scaled.width(), scaled.height())
+    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(0, 0, 0, 14))
+    painter.fillRect(page_rect, QColor("#ffffff"))
+    painter.drawPixmap(page_rect.topLeft(), scaled)
+    painter.setPen(QPen(QColor("#cfd7e2"), 1))
+    painter.drawRect(page_rect)
+    painter.end()
+    return canvas
