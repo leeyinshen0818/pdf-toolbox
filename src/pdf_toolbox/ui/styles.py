@@ -79,6 +79,27 @@ QListWidget#ImageList {
     outline: 0;
 }
 
+QListWidget#PageThumbnailList {
+    border: 1px solid #dfe4ea;
+    border-radius: 8px;
+    background: #ffffff;
+    outline: 0;
+    padding: 8px;
+}
+
+QListWidget#PageThumbnailList::item {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px;
+    color: #374151;
+}
+
+QListWidget#PageThumbnailList::item:selected {
+    background: #edf4fd;
+    border: 1px solid #8fb3df;
+    color: #163b66;
+}
+
 QListWidget#ImageList::item {
     border: none;
     padding: 4px;
@@ -179,6 +200,31 @@ QListView#ComboPopup::item:selected {
 QComboBox:disabled {
     color: #596575;
     background: #f1f3f6;
+}
+
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    color: #24292f;
+    min-height: 34px;
+    padding: 4px 10px;
+}
+
+QLineEdit:read-only {
+    background: #f8fafc;
+}
+
+QProgressBar {
+    background: #eef2f6;
+    border: 1px solid #d8e0ea;
+    border-radius: 6px;
+    min-height: 10px;
+}
+
+QProgressBar::chunk {
+    background: #1f4f82;
+    border-radius: 5px;
 }
 
 QPushButton#IconButton {

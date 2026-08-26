@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
+from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
 from pdf_toolbox.ui.styles import APP_STYLE
 
 
@@ -31,7 +33,7 @@ class MainWindow(QMainWindow):
         sidebar = self._build_sidebar()
         self.stack = QStackedWidget()
         self.stack.addWidget(ImageToPdfPage())
-        self.stack.addWidget(self._placeholder_page("PDF -> Image", "Reserved for Phase 2."))
+        self.stack.addWidget(PdfToImagePage())
         self.stack.addWidget(self._placeholder_page("PDF Organizer", "Reserved for Phase 3."))
 
         layout.addWidget(sidebar)
@@ -50,19 +52,25 @@ class MainWindow(QMainWindow):
 
         title = QLabel("PDF Toolbox")
         title.setObjectName("SidebarTitle")
+        button_group = QButtonGroup(sidebar)
+        button_group.setExclusive(True)
 
         image_to_pdf = QPushButton("Image -> PDF")
         image_to_pdf.setObjectName("NavButton")
         image_to_pdf.setCheckable(True)
         image_to_pdf.setChecked(True)
         image_to_pdf.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        button_group.addButton(image_to_pdf)
 
         pdf_to_image = QPushButton("PDF -> Image")
         pdf_to_image.setObjectName("NavButton")
-        pdf_to_image.setEnabled(False)
+        pdf_to_image.setCheckable(True)
+        pdf_to_image.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        button_group.addButton(pdf_to_image)
 
         organizer = QPushButton("PDF Organizer")
         organizer.setObjectName("NavButton")
+        organizer.setCheckable(True)
         organizer.setEnabled(False)
 
         layout.addWidget(title)

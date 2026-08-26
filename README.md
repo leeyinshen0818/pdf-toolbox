@@ -12,7 +12,15 @@ Phase 1 implements Image -> PDF:
 - Preview page layout before export.
 - Apply non-destructive per-image sharpness, brightness, and contrast corrections.
 
-Future phases are reserved for PDF -> Image and PDF Organizer.
+Phase 2 implements PDF -> Image:
+
+- Import one PDF using the file picker or drag and drop.
+- Preview PDF pages as selectable thumbnails.
+- Export selected pages as JPG or PNG.
+- Choose Standard 150 DPI or High 300 DPI output.
+- Use collision-safe page filenames in the selected output folder.
+
+PDF Organizer is reserved for a future phase.
 
 ## Run
 
