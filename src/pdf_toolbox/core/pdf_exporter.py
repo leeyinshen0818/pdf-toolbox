@@ -105,7 +105,7 @@ class PdfExporter:
         except Exception as exc:
             if isinstance(exc, PdfExportError):
                 raise
-            raise PdfExportError(f"Export failed: {exc}") from exc
+            raise PdfExportError("Export failed. The PDF could not be created.") from exc
         finally:
             if not document.is_closed:
                 document.close()
@@ -131,4 +131,4 @@ class PdfExporter:
         except PdfExportError:
             raise
         except Exception as exc:
-            raise PdfExportError(f"Could not prepare {path.name} for export.") from exc
+            raise PdfExportError(f"This image could not be opened: {path.name}") from exc

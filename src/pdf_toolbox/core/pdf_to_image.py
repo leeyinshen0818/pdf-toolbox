@@ -92,7 +92,7 @@ class PdfToImageService:
     def load_pdf_info(self, path: str | Path) -> PdfInfo:
         pdf_path = Path(path)
         if not pdf_path.exists():
-            raise PdfLoadError("PDF file no longer exists.")
+            raise PdfLoadError("The source file could not be found.")
         if not pdf_path.is_file():
             raise PdfLoadError("Path is not a file.")
         if pdf_path.suffix.lower() != ".pdf":
@@ -101,12 +101,12 @@ class PdfToImageService:
         try:
             with pymupdf.open(pdf_path) as document:
                 if document.needs_pass:
-                    raise PdfLoadError("This PDF is password-protected and cannot be opened without a password.")
+                    raise PdfLoadError("This PDF is password protected and cannot be opened.")
                 page_count = document.page_count
         except PdfLoadError:
             raise
         except Exception as exc:
-            raise PdfLoadError("File is not a readable PDF.") from exc
+            raise PdfLoadError("The PDF appears to be corrupted.") from exc
 
         if page_count <= 0:
             raise PdfLoadError("PDF has no pages.")
@@ -167,7 +167,7 @@ class PdfToImageService:
     ) -> tuple[Path, ...]:
         output_dir = Path(output_folder)
         if not output_dir.exists():
-            raise PdfRenderError("Output folder does not exist.")
+            raise PdfRenderError("The selected output folder is no longer available.")
         if not output_dir.is_dir():
             raise PdfRenderError("Output path is not a folder.")
 
@@ -214,7 +214,7 @@ class PdfToImageService:
         try:
             with pymupdf.open(path) as document:
                 if document.needs_pass:
-                    raise PdfRenderError("This PDF is password-protected and cannot be opened without a password.")
+                    raise PdfRenderError("This PDF is password protected and cannot be opened.")
                 if page_index < 0 or page_index >= document.page_count:
                     raise PdfRenderError(f"Page {page_index + 1} is outside the PDF page range.")
 
@@ -225,7 +225,7 @@ class PdfToImageService:
         except PdfRenderError:
             raise
         except Exception as exc:
-            raise PdfRenderError(f"Failed to render page {page_index + 1}.") from exc
+            raise PdfRenderError(f"The source file could not be opened for page {page_index + 1}.") from exc
 
     def _save_pixmap_atomic(
         self,

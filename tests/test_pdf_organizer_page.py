@@ -48,9 +48,14 @@ def load_fake_workspace(page: PdfOrganizerPage, tmp_path: Path) -> None:
 
 def test_organizer_empty_state_and_toolbar_defaults(app: QApplication) -> None:
     page = PdfOrganizerPage()
+    labels = [label.text() for label in page.empty_state.findChildren(type(page.info_label))]
 
+    assert "Add PDFs to start organizing pages" in labels
     assert page.add_button.text() == "Add PDFs"
+    assert page.add_button.objectName() == "PrimaryButton"
     assert page.export_button.text() == "Export PDF"
+    assert page.export_button.objectName() == "PrimaryButton"
+    assert page.delete_button.objectName() != "PrimaryButton"
     assert not page.export_button.isEnabled()
     assert not page.delete_button.isEnabled()
     assert page.stack.currentWidget() == page.empty_state
@@ -137,7 +142,7 @@ def test_export_success_opens_output_location(app: QApplication, tmp_path: Path)
     page._on_export_finished(str(output))
 
     assert calls == [(output, True)]
-    assert page.status_label.text() == f"PDF exported successfully - {output}"
+    assert page.status_label.text() == "Organized PDF exported successfully."
 
 
 def test_loading_duplicate_source_does_not_add_pages(app: QApplication, tmp_path: Path) -> None:

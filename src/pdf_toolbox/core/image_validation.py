@@ -26,7 +26,7 @@ def validate_image_file(path: str | Path) -> ImageInfo:
     image_path = Path(path)
 
     if not image_path.exists():
-        raise ImageValidationError("File no longer exists.")
+        raise ImageValidationError("The source file could not be found.")
     if not image_path.is_file():
         raise ImageValidationError("Path is not a file.")
 
@@ -43,14 +43,14 @@ def validate_image_file(path: str | Path) -> ImageInfo:
             width, height = oriented.size
             image_format = (image.format or extension.lstrip(".")).upper()
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        raise ImageValidationError("File is not a readable image.") from exc
+        raise ImageValidationError("This image could not be opened.") from exc
 
     if width <= 0 or height <= 0:
         raise ImageValidationError("Image has invalid dimensions.")
 
     expected_format = "JPEG" if extension in {".jpg", ".jpeg"} else "PNG"
     if image_format != expected_format:
-        raise ImageValidationError("File extension does not match a supported image format.")
+        raise ImageValidationError("This file is not a supported JPG, JPEG, or PNG image.")
 
     return ImageInfo(
         path=image_path,

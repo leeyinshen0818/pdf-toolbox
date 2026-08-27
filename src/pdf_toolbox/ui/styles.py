@@ -43,6 +43,7 @@ QPushButton {
     border-radius: 6px;
     background: #ffffff;
     color: #24292f;
+    min-height: 34px;
     padding: 7px 11px;
 }
 
@@ -89,6 +90,14 @@ QListWidget#ImageList {
     border-radius: 8px;
     background: #ffffff;
     outline: 0;
+}
+
+QListWidget#ImageList[dropActive="true"],
+QListWidget#PageThumbnailList[dropActive="true"],
+QListWidget#OrganizerPageGrid[dropActive="true"],
+QFrame#DropArea[dropActive="true"] {
+    background: #f7fbff;
+    border-color: #8fb3df;
 }
 
 QListWidget#PageThumbnailList {
@@ -319,6 +328,12 @@ QFrame#Divider {
 QLabel#ImageName {
     color: #1f2328;
     font-weight: 600;
+}
+
+QLabel#ImageOrderNumber {
+    color: #536170;
+    font-size: 12px;
+    font-weight: 700;
 }
 
 QLabel#ImageDimensions,

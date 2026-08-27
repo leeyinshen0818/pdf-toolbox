@@ -60,19 +60,19 @@ def test_corrupted_pdf_rejected(tmp_path: Path) -> None:
     pdf = tmp_path / "broken.pdf"
     pdf.write_bytes(b"not a pdf")
 
-    with pytest.raises(PdfLoadError, match="readable PDF"):
+    with pytest.raises(PdfLoadError, match="corrupted"):
         PdfToImageService().load_pdf_info(pdf)
 
 
 def test_missing_pdf_rejected(tmp_path: Path) -> None:
-    with pytest.raises(PdfLoadError, match="no longer exists"):
+    with pytest.raises(PdfLoadError, match="source file could not be found"):
         PdfToImageService().load_pdf_info(tmp_path / "missing.pdf")
 
 
 def test_encrypted_pdf_handled_gracefully(tmp_path: Path) -> None:
     pdf = make_encrypted_pdf(tmp_path / "locked.pdf")
 
-    with pytest.raises(PdfLoadError, match="password-protected"):
+    with pytest.raises(PdfLoadError, match="password protected"):
         PdfToImageService().load_pdf_info(pdf)
 
 

@@ -56,18 +56,23 @@ class PdfDropArea(QFrame):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(8)
 
-        title = QLabel("Drop a PDF here")
+        title = QLabel("Add PDF files to convert pages into images")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
         hint = QLabel("You can add multiple PDF files.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
+        button = QPushButton("Add PDFs")
+        button.setObjectName("PrimaryButton")
+        button.clicked.connect(lambda: self.files_dropped.emit([]))
 
         layout.addWidget(title)
         layout.addWidget(hint)
+        layout.addWidget(button, alignment=Qt.AlignCenter)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -79,12 +84,17 @@ class PdfDropArea(QFrame):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
 
 
 class PageThumbnailList(QListWidget):
@@ -105,6 +115,7 @@ class PageThumbnailList(QListWidget):
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -116,12 +127,17 @@ class PageThumbnailList(QListWidget):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
 
 
 class ThumbnailWorker(QObject):
@@ -223,7 +239,7 @@ class PdfToImagePage(QWidget):
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
-        self.add_button = QPushButton("Add PDF")
+        self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
         self.add_button.clicked.connect(self._choose_pdf)
@@ -243,7 +259,7 @@ class PdfToImagePage(QWidget):
 
         self.stack = QStackedWidget()
         self.empty_state = PdfDropArea()
-        self.empty_state.files_dropped.connect(self._add_pdf_paths)
+        self.empty_state.files_dropped.connect(self._handle_empty_add)
         self.thumbnail_list = PageThumbnailList()
         self.thumbnail_list.files_dropped.connect(self._add_pdf_paths)
         self.stack.addWidget(self.empty_state)
@@ -368,6 +384,12 @@ class PdfToImagePage(QWidget):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Select PDFs", "", "PDF files (*.pdf)")
         if file_paths:
             self._add_pdf_paths(file_paths)
+
+    def _handle_empty_add(self, paths: list[str]) -> None:
+        if paths:
+            self._add_pdf_paths(paths)
+        else:
+            self._choose_pdf()
 
     def _add_pdf_paths(self, paths: list[str]) -> None:
         pdf_paths = [Path(path) for path in paths if Path(path).suffix.lower() == ".pdf"]
@@ -711,3 +733,9 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter.drawRect(page_rect)
     painter.end()
     return canvas
+
+
+def set_drop_active(widget: QWidget, active: bool) -> None:
+    widget.setProperty("dropActive", active)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)

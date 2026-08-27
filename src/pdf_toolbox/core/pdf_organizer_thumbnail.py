@@ -14,7 +14,7 @@ class PdfOrganizerThumbnailService:
         try:
             with pymupdf.open(Path(path)) as document:
                 if document.needs_pass:
-                    raise PdfOrganizerThumbnailError("PDF is encrypted.")
+                    raise PdfOrganizerThumbnailError("This PDF is password protected and cannot be opened.")
                 if page_index < 0 or page_index >= document.page_count:
                     raise PdfOrganizerThumbnailError("Page is outside the PDF page range.")
                 page = document.load_page(page_index)
@@ -24,4 +24,4 @@ class PdfOrganizerThumbnailService:
         except PdfOrganizerThumbnailError:
             raise
         except Exception as exc:
-            raise PdfOrganizerThumbnailError("Failed to render page thumbnail.") from exc
+            raise PdfOrganizerThumbnailError("Preview unavailable for this page.") from exc

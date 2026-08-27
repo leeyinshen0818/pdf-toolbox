@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QSettings
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidget, QPushButton
 from PIL import Image
 
 from pdf_toolbox.core.output_location import OpenLocationResult
@@ -90,6 +90,19 @@ def test_pdf_to_image_setting_defaults_are_populated(app: QApplication) -> None:
     assert page.jpg_quality_combo.currentText() == JpgQuality.MAXIMUM.value
 
 
+def test_pdf_to_image_empty_state_and_primary_buttons(app: QApplication) -> None:
+    page = PdfToImagePage()
+    labels = [label.text() for label in page.empty_state.findChildren(type(page.pdf_info_label))]
+
+    assert "Add PDF files to convert pages into images" in labels
+    assert page.add_button.text() == "Add PDFs"
+    assert page.add_button.objectName() == "PrimaryButton"
+    empty_buttons = page.empty_state.findChildren(QPushButton)
+    assert any(button.text() == "Add PDFs" and button.objectName() == "PrimaryButton" for button in empty_buttons)
+    assert page.convert_button.objectName() == "PrimaryButton"
+    assert page.clear_button.objectName() != "PrimaryButton"
+
+
 def test_all_pages_are_displayed_by_default_in_thumbnail_grid(app: QApplication, tmp_path: Path) -> None:
     page = PdfToImagePage()
     load_fake_pdf(page, tmp_path, page_count=4)
@@ -158,6 +171,19 @@ def test_conversion_uses_all_pages_from_all_loaded_pdfs(app: QApplication, tmp_p
         ("second.pdf", 1),
         ("second.pdf", 2),
     ]
+
+
+def test_large_pdf_workspace_uses_thumbnail_resolution_requests(app: QApplication, tmp_path: Path) -> None:
+    page = PdfToImagePage()
+    info = fake_info(tmp_path / "large.pdf", 100)
+    page.state.add_pdf(info)
+    page._populate_page_items()
+
+    requests = page._thumbnail_requests()
+
+    assert page.thumbnail_list.count() == 100
+    assert len(requests) == 100
+    assert all(request[2] < 100 for request in requests)
 
 
 def test_thumbnail_requests_include_missing_pages_from_previous_uploads(app: QApplication, tmp_path: Path) -> None:

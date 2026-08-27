@@ -145,6 +145,34 @@ def test_fit_pages_may_have_different_dimensions(tmp_path: Path) -> None:
         assert document[0].rect != document[1].rect
 
 
+@pytest.mark.parametrize(
+    ("filename", "size"),
+    [
+        ("portrait.png", (800, 1200)),
+        ("landscape.png", (1200, 800)),
+        ("square.png", (900, 900)),
+    ],
+)
+def test_fit_export_preserves_portrait_landscape_and_square_geometry(
+    tmp_path: Path,
+    filename: str,
+    size: tuple[int, int],
+) -> None:
+    image = make_rgb(tmp_path / filename, size=size)
+    output = tmp_path / f"{Path(filename).stem}.pdf"
+
+    PdfExporter().export(
+        entries_for([image]),
+        output,
+        settings=ExportSettings(page_size=PageSizeMode.FIT, orientation=PageOrientation.LANDSCAPE),
+    )
+
+    with pymupdf.open(output) as document:
+        page = document[0]
+        assert page.rect.width / page.rect.height == pytest.approx(size[0] / size[1])
+        assert_rect_close(placed_image_rect(page), page.rect)
+
+
 def test_a4_pages_remain_consistent_when_selected(tmp_path: Path) -> None:
     small = make_rgb(tmp_path / "small.png", size=(40, 20), color=(255, 0, 0))
     tall = make_rgb(tmp_path / "tall.jpg", size=(200, 900), color=(0, 255, 0))
@@ -189,6 +217,20 @@ def test_landscape_orientation_for_fixed_page_size(tmp_path: Path) -> None:
 
     with pymupdf.open(output) as document:
         assert_page_size(document[0], A4_PORTRAIT.height, A4_PORTRAIT.width)
+
+
+def test_letter_landscape_orientation_for_fixed_page_size(tmp_path: Path) -> None:
+    image = make_rgb(tmp_path / "image.png")
+    output = tmp_path / "letter-landscape.pdf"
+
+    PdfExporter().export(
+        entries_for([image]),
+        output,
+        settings=ExportSettings(page_size=PageSizeMode.LETTER, orientation=PageOrientation.LANDSCAPE),
+    )
+
+    with pymupdf.open(output) as document:
+        assert_page_size(document[0], LETTER_PORTRAIT.height, LETTER_PORTRAIT.width)
 
 
 def test_margins_keep_image_uncropped_inside_page(tmp_path: Path) -> None:
@@ -255,7 +297,7 @@ def test_missing_source_image_is_handled(tmp_path: Path) -> None:
     entries = entries_for([image])
     image.unlink()
 
-    with pytest.raises(PdfExportError, match="File no longer exists"):
+    with pytest.raises(PdfExportError, match="source file could not be found"):
         PdfExporter().export(entries, tmp_path / "missing.pdf")
 
 

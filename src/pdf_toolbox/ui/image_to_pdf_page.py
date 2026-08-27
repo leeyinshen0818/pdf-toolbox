@@ -6,6 +6,7 @@ from PIL import Image
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QButtonGroup,
     QComboBox,
@@ -46,6 +47,7 @@ from pdf_toolbox.core.output_location import open_output_location
 
 
 PATH_ROLE = Qt.UserRole + 1
+AUTO_ORIENTATION_LABEL = "Auto - Based on Image"
 
 
 class ImageListWidget(QListWidget):
@@ -61,10 +63,15 @@ class ImageListWidget(QListWidget):
         self.setDragDropMode(QListWidget.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QListWidget.ExtendedSelection)
-        self.setSpacing(6)
+        self.setSpacing(5)
+        self.setUniformItemSizes(True)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(48)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -76,6 +83,7 @@ class ImageListWidget(QListWidget):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
@@ -84,6 +92,10 @@ class ImageListWidget(QListWidget):
 
         super().dropEvent(event)
         self.order_changed.emit(self.paths_in_order())
+
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
 
     def paths_in_order(self) -> list[str]:
         return [self.item(index).data(PATH_ROLE) for index in range(self.count())]
@@ -99,6 +111,7 @@ class DropAreaFrame(QFrame):
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -110,6 +123,7 @@ class DropAreaFrame(QFrame):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
@@ -117,22 +131,32 @@ class DropAreaFrame(QFrame):
             return
         super().dropEvent(event)
 
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
+
 
 class ImageRowWidget(QWidget):
     delete_requested = Signal(str)
 
-    def __init__(self, entry: ImageEntry, thumbnail: QPixmap) -> None:
+    def __init__(self, entry: ImageEntry, thumbnail: QPixmap, order_number: int) -> None:
         super().__init__()
         self.setObjectName("ImageRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.path = str(entry.path)
+        self.setMinimumHeight(76)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(9)
+
+        order_label = QLabel(str(order_number))
+        order_label.setObjectName("ImageOrderNumber")
+        order_label.setFixedWidth(24)
+        order_label.setAlignment(Qt.AlignCenter)
 
         thumbnail_label = QLabel()
-        thumbnail_label.setFixedSize(78, 78)
+        thumbnail_label.setFixedSize(58, 58)
         thumbnail_label.setAlignment(Qt.AlignCenter)
         thumbnail_label.setPixmap(thumbnail)
         thumbnail_label.setStyleSheet(
@@ -143,50 +167,71 @@ class ImageRowWidget(QWidget):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
 
-        filename = QLabel(entry.filename)
+        filename = ElidedLabel(entry.filename)
         filename.setObjectName("ImageName")
-        filename.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        filename.setToolTip(entry.filename)
 
         dimensions = QLabel(f"{entry.width} x {entry.height} px")
         dimensions.setObjectName("ImageDimensions")
 
-        text_layout.addStretch(1)
         text_layout.addWidget(filename)
         text_layout.addWidget(dimensions)
-        text_layout.addStretch(1)
 
         delete_button = QPushButton()
         delete_button.setObjectName("IconButton")
         delete_button.setToolTip("Remove image")
-        delete_button.setFixedSize(32, 32)
+        delete_button.setFixedSize(28, 28)
         delete_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
-        delete_button.setIconSize(QSize(18, 18))
+        delete_button.setIconSize(QSize(16, 16))
         delete_button.clicked.connect(lambda: self.delete_requested.emit(self.path))
 
+        layout.addWidget(order_label)
         layout.addWidget(thumbnail_label)
         layout.addLayout(text_layout, 1)
         layout.addWidget(delete_button, alignment=Qt.AlignVCenter)
+
+
+class ElidedLabel(QLabel):
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.full_text = text
+        self.setText(text)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        self.setText(self.fontMetrics().elidedText(self.full_text, Qt.ElideMiddle, max(24, self.width())))
 
 
 class PreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumHeight(300)
+        self.setMinimumSize(280, 360)
         self._pixmap: QPixmap | None = None
         self._image_size: tuple[int, int] | None = None
         self._settings = ExportSettings()
+        self._empty_text = "Add images to begin"
 
     def set_preview(
         self,
         pixmap: QPixmap | None,
         image_size: tuple[int, int] | None,
         settings: ExportSettings,
+        empty_text: str = "Select an image to preview",
     ) -> None:
         self._pixmap = pixmap
         self._image_size = image_size
         self._settings = settings
+        self._empty_text = empty_text
         self.update()
+
+    def current_layout(self):
+        if self._image_size is None:
+            return None
+        return calculate_page_layout(self._image_size[0], self._image_size[1], self._settings)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -195,10 +240,12 @@ class PreviewWidget(QWidget):
 
         if self._pixmap is None or self._image_size is None:
             painter.setPen(QColor("#7a8491"))
-            painter.drawText(self.rect(), Qt.AlignCenter, "Select an image to preview")
+            painter.drawText(self.rect(), Qt.AlignCenter, self._empty_text)
             return
 
-        layout = calculate_page_layout(self._image_size[0], self._image_size[1], self._settings)
+        layout = self.current_layout()
+        if layout is None:
+            return
         available = self.rect().adjusted(18, 18, -18, -18)
         scale = min(available.width() / layout.page_size.width, available.height() / layout.page_size.height)
         page_width = layout.page_size.width * scale
@@ -265,11 +312,14 @@ class ImageToPdfPage(QWidget):
         self.export_thread: QThread | None = None
         self.export_worker: ExportWorker | None = None
         self.preview_cache: dict[tuple[str, int, tuple[str, str]], tuple[QPixmap, tuple[int, int]]] = {}
+        self.thumbnail_cache: dict[tuple[str, int], QPixmap] = {}
         self.sharpness_buttons: dict[SharpnessPreset, QPushButton] = {}
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
         self.open_output_location = open_output_location
+        self._fixed_orientation = PageOrientation.PORTRAIT
 
         self._build_ui()
+        self._sync_orientation_control()
         self._update_state()
         self._update_preview()
 
@@ -295,13 +345,10 @@ class ImageToPdfPage(QWidget):
         toolbar.addStretch(1)
 
         content = QHBoxLayout()
-        content.setSpacing(20)
+        content.setSpacing(18)
 
-        main_area = QVBoxLayout()
-        main_area.setSpacing(12)
-
-        list_heading = QLabel("Imported Images")
-        list_heading.setObjectName("PanelHeading")
+        self.list_heading = QLabel("Imported Images")
+        self.list_heading.setObjectName("PanelHeading")
         self.stack = QStackedWidget()
         self.empty_state = self._build_empty_state()
         self.image_list = ImageListWidget()
@@ -310,17 +357,25 @@ class ImageToPdfPage(QWidget):
         self.image_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.image_list)
-        self.stack.setMinimumHeight(230)
-        self.stack.setMaximumHeight(350)
+        self.stack.setMinimumSize(330, 360)
 
         self.preview = PreviewWidget()
 
-        main_area.addWidget(list_heading)
-        main_area.addWidget(self.stack)
-        main_area.addWidget(self.preview, 1)
+        list_area = QVBoxLayout()
+        list_area.setSpacing(8)
+        list_area.addWidget(self.list_heading)
+        list_area.addWidget(self.stack, 1)
 
-        content.addLayout(main_area, 1)
-        content.addWidget(self._build_settings_panel())
+        preview_area = QVBoxLayout()
+        preview_area.setSpacing(8)
+        self.preview_heading = QLabel("Preview")
+        self.preview_heading.setObjectName("PanelHeading")
+        preview_area.addWidget(self.preview_heading)
+        preview_area.addWidget(self.preview, 1)
+
+        content.addLayout(list_area, 4)
+        content.addLayout(preview_area, 4)
+        content.addWidget(self._build_settings_panel(), 3)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("StatusText")
@@ -343,12 +398,12 @@ class ImageToPdfPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(350)
-        scroll.setMaximumWidth(430)
+        scroll.setMinimumWidth(310)
+        scroll.setMaximumWidth(390)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(350)
+        panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
@@ -443,14 +498,14 @@ class ImageToPdfPage(QWidget):
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumHeight(36)
-        combo.setMinimumWidth(300)
+        combo.setMinimumWidth(260)
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(24)
         for item in enum_type:
             combo.addItem(item.value, item.value)
         combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(320)
+        combo.view().setMinimumWidth(300)
         return combo
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
@@ -469,13 +524,14 @@ class ImageToPdfPage(QWidget):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(8)
 
-        title = QLabel("Drop images here")
+        title = QLabel("Add images to create a PDF")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
-        hint = QLabel("JPG, JPEG, and PNG files are supported.")
+        hint = QLabel("Drag and drop JPG, JPEG, or PNG files here.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
-        button = QPushButton("Select Images")
+        button = QPushButton("Add Images")
+        button.setObjectName("PrimaryButton")
         button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         button.clicked.connect(self._choose_images)
 
@@ -499,31 +555,44 @@ class ImageToPdfPage(QWidget):
         self._update_state()
         self._update_preview()
 
-    def _append_item(self, entry: ImageEntry) -> None:
+    def _append_item(self, entry: ImageEntry, order_number: int) -> None:
         item = QListWidgetItem()
         item.setData(PATH_ROLE, str(entry.path))
-        item.setSizeHint(QSize(240, 104))
+        item.setSizeHint(QSize(300, 84))
         self.image_list.addItem(item)
-        row = ImageRowWidget(entry, self._thumbnail_for(entry.path))
+        row = ImageRowWidget(entry, self._thumbnail_for(entry.path), order_number)
         row.delete_requested.connect(self._remove_path)
         self.image_list.setItemWidget(item, row)
 
     def _thumbnail_for(self, path: Path) -> QPixmap:
+        try:
+            stat = path.stat()
+        except OSError:
+            pixmap = QPixmap(56, 56)
+            pixmap.fill(Qt.white)
+            return pixmap
+        cache_key = (str(path), stat.st_mtime_ns)
+        cached = self.thumbnail_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         reader = QImageReader(str(path))
         reader.setAutoTransform(True)
         image = reader.read()
         if image.isNull():
-            pixmap = QPixmap(76, 76)
+            pixmap = QPixmap(56, 56)
             pixmap.fill(Qt.white)
             return pixmap
-        return QPixmap.fromImage(image).scaled(74, 74, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pixmap = QPixmap.fromImage(image).scaled(54, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.thumbnail_cache[cache_key] = pixmap
+        return pixmap
 
     def _sync_list_from_collection(self) -> None:
         selected_paths = {item.data(PATH_ROLE) for item in self.image_list.selectedItems()}
         current_path = self._current_path()
         self.image_list.clear()
-        for entry in self.collection.entries:
-            self._append_item(entry)
+        for order_number, entry in enumerate(self.collection.entries, start=1):
+            self._append_item(entry, order_number)
             item = self.image_list.item(self.image_list.count() - 1)
             if str(entry.path) in selected_paths:
                 item.setSelected(True)
@@ -535,15 +604,19 @@ class ImageToPdfPage(QWidget):
             self.collection.reorder_by_paths(paths)
         except ValueError:
             self._sync_list_from_collection()
+            return
+        self._sync_list_from_collection()
         self._update_state()
         self._update_preview()
 
     def _remove_path(self, path: str) -> None:
+        removed_index = self._row_for_path(path)
         removed_current = path == self._current_path()
         self.collection.remove_paths([path])
         self._sync_list_from_collection()
-        if removed_current and self.collection.entries:
-            self.image_list.setCurrentRow(0)
+        if self.collection.entries and (removed_current or self._current_entry() is None):
+            next_row = min(max(removed_index, 0), len(self.collection.entries) - 1)
+            self.image_list.setCurrentRow(next_row)
         self.status_label.setText("Image removed.")
         self._update_state()
         self._update_preview()
@@ -552,6 +625,7 @@ class ImageToPdfPage(QWidget):
         self.collection.clear()
         self.image_list.clear()
         self.preview_cache.clear()
+        self.thumbnail_cache.clear()
         self.status_label.setText("Image list cleared.")
         self._update_state()
         self._update_preview()
@@ -600,10 +674,10 @@ class ImageToPdfPage(QWidget):
 
     def _on_export_finished(self, output_path: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText(f"Export complete - {output_path}")
+        self.status_label.setText("PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
-            self.status_label.setText("Export complete, but the output folder could not be opened.")
+            self.status_label.setText("PDF exported successfully, but the output folder could not be opened.")
 
     def _on_export_failed(self, message: str) -> None:
         self._set_exporting(False)
@@ -633,7 +707,7 @@ class ImageToPdfPage(QWidget):
         self.clear_button.setEnabled(not exporting and has_images)
         self.export_button.setEnabled(not exporting and has_images)
         self._set_correction_controls_enabled(not exporting and has_selection)
-        self.orientation_combo.setEnabled(self._page_size_mode() != PageSizeMode.FIT)
+        self._sync_orientation_control()
 
         if not has_selection:
             self.selection_label.setText("Select an image")
@@ -671,7 +745,9 @@ class ImageToPdfPage(QWidget):
         self._update_preview()
 
     def _on_export_settings_changed(self, _index: int | None = None) -> None:
-        self.orientation_combo.setEnabled(self._page_size_mode() != PageSizeMode.FIT)
+        if self.sender() is self.orientation_combo and self._page_size_mode() != PageSizeMode.FIT:
+            self._fixed_orientation = PageOrientation(self.orientation_combo.currentData())
+        self._sync_orientation_control()
         self._update_preview()
 
     def _toggle_corrections(self, checked: bool) -> None:
@@ -716,14 +792,15 @@ class ImageToPdfPage(QWidget):
             button.setChecked(preset == corrections.tone)
 
     def _update_preview(self) -> None:
-        entry = self._current_entry() or (self.collection.entries[0] if self.collection.entries else None)
+        entry = self._current_entry()
         if entry is None:
-            self.preview.set_preview(None, None, self._export_settings())
+            empty_text = "Add images to begin" if not self.collection.entries else "Select an image to preview"
+            self.preview.set_preview(None, None, self._export_settings(), empty_text)
             return
         try:
             pixmap, size = self._preview_pixmap_for_entry(entry)
         except Exception:
-            self.preview.set_preview(None, None, self._export_settings())
+            self.preview.set_preview(None, None, self._export_settings(), "Select an image to preview")
             return
         self.preview.set_preview(pixmap, size, self._export_settings())
 
@@ -753,9 +830,34 @@ class ImageToPdfPage(QWidget):
     def _export_settings(self) -> ExportSettings:
         return ExportSettings(
             page_size=self._page_size_mode(),
-            orientation=PageOrientation(self.orientation_combo.currentData()),
+            orientation=self._current_orientation(),
             margin=MarginPreset(self.margin_combo.currentData()),
         )
+
+    def _current_orientation(self) -> PageOrientation:
+        if self._page_size_mode() == PageSizeMode.FIT:
+            return self._fixed_orientation
+        return PageOrientation(self.orientation_combo.currentData())
+
+    def _sync_orientation_control(self) -> None:
+        mode = self._page_size_mode()
+        previous_blocked = self.orientation_combo.blockSignals(True)
+        try:
+            if mode == PageSizeMode.FIT:
+                self.orientation_combo.clear()
+                self.orientation_combo.addItem(AUTO_ORIENTATION_LABEL, AUTO_ORIENTATION_LABEL)
+                self.orientation_combo.setCurrentIndex(0)
+                self.orientation_combo.setEnabled(False)
+                return
+
+            current = self._fixed_orientation
+            self.orientation_combo.clear()
+            for orientation in PageOrientation:
+                self.orientation_combo.addItem(orientation.value, orientation.value)
+            self.orientation_combo.setCurrentIndex(self.orientation_combo.findData(current.value))
+            self.orientation_combo.setEnabled(True)
+        finally:
+            self.orientation_combo.blockSignals(previous_blocked)
 
     def _page_size_mode(self) -> PageSizeMode:
         return PageSizeMode(self.page_size_combo.currentData())
@@ -770,14 +872,24 @@ class ImageToPdfPage(QWidget):
                 item.setSelected(True)
                 return
 
+    def _row_for_path(self, path: str | Path) -> int:
+        target = str(path)
+        for index in range(self.image_list.count()):
+            item = self.image_list.item(index)
+            if item.data(PATH_ROLE) == target:
+                return index
+        return 0
+
     def _current_path(self) -> str | None:
         item = self.image_list.currentItem()
         return item.data(PATH_ROLE) if item is not None else None
 
     def _current_entry(self) -> ImageEntry | None:
-        current_path = self._current_path()
-        if current_path is None:
+        selected = self.image_list.selectedItems()
+        if not selected:
             return None
+        current_item = self.image_list.currentItem()
+        current_path = current_item.data(PATH_ROLE) if current_item in selected else selected[0].data(PATH_ROLE)
         return self._entry_for_path(current_path)
 
     def _entry_for_path(self, path: str | Path) -> ImageEntry | None:
@@ -786,3 +898,9 @@ class ImageToPdfPage(QWidget):
             if str(entry.path) == target:
                 return entry
         return None
+
+
+def set_drop_active(widget: QWidget, active: bool) -> None:
+    widget.setProperty("dropActive", active)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)

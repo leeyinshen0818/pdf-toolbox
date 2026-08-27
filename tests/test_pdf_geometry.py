@@ -26,6 +26,22 @@ def test_fit_mode_uses_image_aspect_ratio_without_margin() -> None:
     assert layout.image_rect.height == pytest.approx(layout.page_size.height)
 
 
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (800, 1200),
+        (1200, 800),
+        (900, 900),
+    ],
+)
+def test_fit_mode_preserves_natural_image_shape(width: int, height: int) -> None:
+    layout = calculate_page_layout(width, height, ExportSettings(page_size=PageSizeMode.FIT))
+
+    assert layout.page_size.width / layout.page_size.height == pytest.approx(width / height)
+    assert layout.image_rect.width == pytest.approx(layout.page_size.width)
+    assert layout.image_rect.height == pytest.approx(layout.page_size.height)
+
+
 def test_fit_mode_margin_enlarges_page_around_image() -> None:
     layout = calculate_page_layout(1000, 500, ExportSettings(margin=MarginPreset.SMALL))
 

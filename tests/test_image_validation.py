@@ -44,7 +44,7 @@ def test_corrupted_image_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "broken.png"
     path.write_bytes(b"this is not a real png")
 
-    with pytest.raises(ImageValidationError, match="readable image"):
+    with pytest.raises(ImageValidationError, match="could not be opened"):
         validate_image_file(path)
 
 

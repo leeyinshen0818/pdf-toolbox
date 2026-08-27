@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -24,6 +23,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PDF Toolbox")
         self.resize(1040, 720)
+        self.setMinimumSize(960, 640)
 
         root = QWidget()
         root.setObjectName("Root")
@@ -84,20 +84,3 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
         return sidebar
-
-    def _placeholder_page(self, title: str, subtitle: str) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignCenter)
-
-        heading = QLabel(title)
-        heading.setAlignment(Qt.AlignCenter)
-        heading.setStyleSheet("font-size: 24px; font-weight: 700; color: #374151;")
-
-        text = QLabel(subtitle)
-        text.setAlignment(Qt.AlignCenter)
-        text.setStyleSheet("font-size: 14px; color: #6b7280;")
-
-        layout.addWidget(heading)
-        layout.addWidget(text)
-        return page

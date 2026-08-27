@@ -63,6 +63,7 @@ class OrganizerDropArea(QFrame):
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -74,12 +75,17 @@ class OrganizerDropArea(QFrame):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
             return
         super().dropEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
 
 
 class OrganizerPageGrid(QListWidget):
@@ -201,6 +207,7 @@ class OrganizerPageGrid(QListWidget):
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
+            set_drop_active(self, True)
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -212,17 +219,18 @@ class OrganizerPageGrid(QListWidget):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
+        set_drop_active(self, False)
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
             return
 
-        before = self.page_ids()
         super().dropEvent(event)
-        after = self.page_ids()
-        if before != after:
-            self.order_changed.emit(before, after)
+
+    def dragLeaveEvent(self, event) -> None:
+        set_drop_active(self, False)
+        super().dragLeaveEvent(event)
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Delete:
@@ -749,10 +757,10 @@ class PdfOrganizerPage(QWidget):
 
     def _on_export_finished(self, output_path: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText(f"PDF exported successfully - {output_path}")
+        self.status_label.setText("Organized PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
-            self.status_label.setText("PDF exported successfully, but the output folder could not be opened.")
+            self.status_label.setText("Organized PDF exported successfully, but the output folder could not be opened.")
 
     def _on_export_failed(self, message: str) -> None:
         self._set_exporting(False)
@@ -870,3 +878,9 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter.drawRect(x, y, scaled.width(), scaled.height())
     painter.end()
     return canvas
+
+
+def set_drop_active(widget: QWidget, active: bool) -> None:
+    widget.setProperty("dropActive", active)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)

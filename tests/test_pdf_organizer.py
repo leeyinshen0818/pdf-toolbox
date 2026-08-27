@@ -98,6 +98,18 @@ def test_cross_pdf_reordering_keeps_source_references(tmp_path: Path) -> None:
     ]
 
 
+def test_large_workspace_reorder_preserves_exact_order(tmp_path: Path) -> None:
+    source = make_pdf(tmp_path / "large.pdf", [f"P{index}" for index in range(120)])
+    workspace = load_workspace(source)
+    ids = workspace.page_ids()
+    reordered = ids[60:] + ids[:60]
+
+    workspace.reorder_by_ids(reordered)
+
+    assert workspace.page_ids() == reordered
+    assert [page.source_page_index for page in workspace.pages[:3]] == [60, 61, 62]
+
+
 def test_duplicate_delete_and_rotation_state(tmp_path: Path) -> None:
     pdf = make_pdf(tmp_path / "a.pdf", ["A1", "A2", "A3"])
     workspace = load_workspace(pdf)
@@ -226,7 +238,7 @@ def test_export_missing_source_fails_cleanly_without_output(tmp_path: Path) -> N
     source.unlink()
     output = tmp_path / "organized.pdf"
 
-    with pytest.raises(PdfOrganizerExportError, match="missing"):
+    with pytest.raises(PdfOrganizerExportError, match="source file could not be found"):
         PdfOrganizerExporter().export(tuple(workspace.pages), output)
 
     assert not output.exists()

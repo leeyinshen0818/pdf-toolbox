@@ -29,7 +29,7 @@ def cleanup_qt_widgets(app: QApplication):
     app.processEvents()
 
 
-@pytest.mark.parametrize("width,height", [(1366, 768), (1920, 1080)])
+@pytest.mark.parametrize("width,height", [(1366, 768), (1920, 1080), (2560, 1440)])
 def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     app: QApplication,
     width: int,
@@ -69,6 +69,13 @@ def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
     app.processEvents()
 
     assert bool(window.windowState() & Qt.WindowMaximized)
+
+
+def test_restored_window_has_sensible_minimum_size(app: QApplication) -> None:
+    window = MainWindow()
+
+    assert window.minimumWidth() >= 960
+    assert window.minimumHeight() >= 640
 
 
 def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:

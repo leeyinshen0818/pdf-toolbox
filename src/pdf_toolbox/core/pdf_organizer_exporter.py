@@ -31,7 +31,7 @@ class PdfOrganizerExporter:
         if target.suffix.lower() != ".pdf":
             target = target.with_suffix(".pdf")
         if not target.parent.exists():
-            raise PdfOrganizerExportError("Output folder does not exist.")
+            raise PdfOrganizerExportError("The selected output folder is no longer available.")
         target_key = resolved_key(target)
         if any(resolved_key(page.source_path) == target_key for page in pages):
             raise PdfOrganizerExportError("Export path cannot be one of the source PDFs.")
@@ -49,15 +49,15 @@ class PdfOrganizerExporter:
             for done, page in enumerate(pages, start=1):
                 source_path = Path(page.source_path)
                 if not source_path.exists():
-                    raise PdfOrganizerExportError(f"Source PDF is missing: {source_path.name}")
+                    raise PdfOrganizerExportError(f"The source file could not be found: {source_path.name}")
                 document = sources.get(source_path)
                 if document is None:
                     try:
                         document = pymupdf.open(source_path)
                     except Exception as exc:
-                        raise PdfOrganizerExportError(f"Could not open source PDF: {source_path.name}") from exc
+                        raise PdfOrganizerExportError(f"The PDF appears to be corrupted: {source_path.name}") from exc
                     if document.needs_pass:
-                        raise PdfOrganizerExportError(f"Source PDF is encrypted: {source_path.name}")
+                        raise PdfOrganizerExportError(f"This PDF is password protected and cannot be opened: {source_path.name}")
                     sources[source_path] = document
 
                 if page.source_page_index < 0 or page.source_page_index >= document.page_count:
