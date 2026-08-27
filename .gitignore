@@ -1,0 +1,12 @@
+build/
+dist/
+release/
+*.log
+*.tmp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp-ui-check.png
+__pycache__/
+*.py[cod]
+

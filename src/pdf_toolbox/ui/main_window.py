@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -12,6 +13,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdf_toolbox.build_metadata import APP_NAME
+from pdf_toolbox.resources import app_icon_path
+from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
@@ -21,7 +25,10 @@ from pdf_toolbox.ui.styles import APP_STYLE
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("PDF Toolbox")
+        self.setWindowTitle(APP_NAME)
+        icon_path = app_icon_path()
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1040, 720)
         self.setMinimumSize(960, 640)
 
@@ -36,6 +43,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(ImageToPdfPage())
         self.stack.addWidget(PdfToImagePage())
         self.stack.addWidget(PdfOrganizerPage())
+        self.stack.addWidget(HeicToJpgPage())
 
         layout.addWidget(sidebar)
         layout.addWidget(self.stack, 1)
@@ -76,11 +84,18 @@ class MainWindow(QMainWindow):
         organizer.clicked.connect(lambda: self.stack.setCurrentIndex(2))
         button_group.addButton(organizer)
 
+        heic_to_jpg = QPushButton("HEIC -> JPG")
+        heic_to_jpg.setObjectName("NavButton")
+        heic_to_jpg.setCheckable(True)
+        heic_to_jpg.clicked.connect(lambda: self.stack.setCurrentIndex(3))
+        button_group.addButton(heic_to_jpg)
+
         layout.addWidget(title)
         layout.addSpacing(12)
         layout.addWidget(image_to_pdf)
         layout.addWidget(pdf_to_image)
         layout.addWidget(organizer)
+        layout.addWidget(heic_to_jpg)
         layout.addStretch(1)
 
         return sidebar

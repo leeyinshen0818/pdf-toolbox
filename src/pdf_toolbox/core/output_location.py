@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Callable, Sequence
 
 
 Launcher = Callable[[Sequence[str]], object]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ def open_output_location(
 ) -> OpenLocationResult:
     target = Path(path)
     if not target.exists():
+        logger.warning("Output location does not exist: %s", target)
         return OpenLocationResult(False, "Output location no longer exists.")
 
     platform = platform_name or sys.platform
@@ -34,6 +37,7 @@ def open_output_location(
     try:
         launch(args)
     except OSError as exc:
+        logger.exception("Failed to open output location: %s", target)
         return OpenLocationResult(False, str(exc))
 
     return OpenLocationResult(True)

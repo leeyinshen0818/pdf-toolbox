@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PIL import Image
@@ -48,6 +49,7 @@ from pdf_toolbox.core.output_location import open_output_location
 
 PATH_ROLE = Qt.UserRole + 1
 AUTO_ORIENTATION_LABEL = "Auto - Based on Image"
+logger = logging.getLogger(__name__)
 
 
 class ImageListWidget(QListWidget):
@@ -299,6 +301,7 @@ class ExportWorker(QObject):
                 progress_callback=self.progress.emit,
             )
         except Exception as exc:
+            logger.exception("Image to PDF export failed")
             self.failed.emit(str(exc))
             return
 
@@ -677,6 +680,7 @@ class ImageToPdfPage(QWidget):
         self.status_label.setText("PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
+            logger.warning("Could not reveal exported PDF: %s", result.message)
             self.status_label.setText("PDF exported successfully, but the output folder could not be opened.")
 
     def _on_export_failed(self, message: str) -> None:

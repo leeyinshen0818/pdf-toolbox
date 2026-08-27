@@ -29,7 +29,7 @@ def cleanup_qt_widgets(app: QApplication):
     app.processEvents()
 
 
-@pytest.mark.parametrize("width,height", [(1366, 768), (1920, 1080), (2560, 1440)])
+@pytest.mark.parametrize("width,height", [(1280, 720), (1366, 768), (1920, 1080), (2560, 1440)])
 def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     app: QApplication,
     width: int,
@@ -61,6 +61,12 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     assert organizer_page.export_button.text() == "Export PDF"
     assert organizer_page.page_grid.isWrapping()
 
+    window.stack.setCurrentIndex(3)
+    app.processEvents()
+    heic_page = window.stack.widget(3)
+    assert heic_page.convert_button.text() == "Convert"
+    assert heic_page.set_default_folder_button.text() == "Set as Default Folder"
+
 
 def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
     window = MainWindow()
@@ -85,3 +91,6 @@ def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:
     assert buttons["PDF Organizer"].isEnabled()
     buttons["PDF Organizer"].click()
     assert window.stack.currentIndex() == 2
+    assert buttons["HEIC -> JPG"].isEnabled()
+    buttons["HEIC -> JPG"].click()
+    assert window.stack.currentIndex() == 3

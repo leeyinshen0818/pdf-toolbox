@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdf-toolbox"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Offline desktop tools for practical PDF workflows."
 requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10",
+    "pillow-heif>=1.5",
     "PyMuPDF>=1.23",
     "PySide6>=6.6",
 ]
@@ -17,12 +18,18 @@ dependencies = [
 test = [
     "pytest>=8",
 ]
+build = [
+    "pyinstaller>=6",
+]
 
 [project.scripts]
 pdf-toolbox = "pdf_toolbox.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pdf_toolbox.build_metadata.APP_VERSION"}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

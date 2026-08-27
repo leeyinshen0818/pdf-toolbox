@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Signal
@@ -33,6 +34,7 @@ from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
 PAGE_ID_ROLE = Qt.UserRole + 30
 THUMBNAIL_SIZE = QSize(136, 176)
 CARD_SIZE = QSize(190, 282)
+logger = logging.getLogger(__name__)
 
 
 class OrganizerDropArea(QFrame):
@@ -334,6 +336,7 @@ class OrganizerThumbnailWorker(QObject):
             try:
                 data = self.service.render_page_png_bytes(path, page_index, rotation)
             except Exception:
+                logger.exception("Organizer thumbnail generation failed")
                 self.thumbnail_failed.emit(page_id, cache_key)
                 continue
             self.thumbnail_ready.emit(page_id, cache_key, data)
@@ -361,6 +364,7 @@ class OrganizerExportWorker(QObject):
                 progress_callback=self.progress.emit,
             )
         except Exception as exc:
+            logger.exception("PDF organizer export failed")
             self.failed.emit(str(exc))
             return
         self.finished.emit(str(result))
@@ -760,6 +764,7 @@ class PdfOrganizerPage(QWidget):
         self.status_label.setText("Organized PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
+            logger.warning("Could not reveal organized PDF: %s", result.message)
             self.status_label.setText("Organized PDF exported successfully, but the output folder could not be opened.")
 
     def _on_export_failed(self, message: str) -> None:

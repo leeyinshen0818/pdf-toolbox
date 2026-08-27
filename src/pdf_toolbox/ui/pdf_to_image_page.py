@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRect, QSettings, QSize, QStandardPaths, Qt, QThread, Signal
@@ -42,6 +43,7 @@ SOURCE_KEY_ROLE = Qt.UserRole + 11
 OUTPUT_FOLDER_SETTING = "pdf_to_image/output_folder"
 THUMBNAIL_ICON_SIZE = QSize(140, 180)
 THUMBNAIL_PAGE_MAX_SIZE = QSize(122, 158)
+logger = logging.getLogger(__name__)
 
 
 class PdfDropArea(QFrame):
@@ -162,6 +164,7 @@ class ThumbnailWorker(QObject):
             try:
                 data = self.service.render_page_png_bytes(path, page_index, dpi=72)
             except Exception as exc:
+                logger.exception("PDF page thumbnail generation failed")
                 self.thumbnail_failed.emit(source_key, page_index, str(exc))
                 continue
             self.thumbnail_ready.emit(source_key, page_index, data)
@@ -203,6 +206,7 @@ class ConversionWorker(QObject):
             self.cancelled.emit(exc.completed_paths)
             return
         except Exception as exc:
+            logger.exception("PDF to image conversion failed")
             self.failed.emit(str(exc))
             return
         self.finished.emit(paths)
@@ -586,6 +590,7 @@ class PdfToImagePage(QWidget):
         if completed and self.state.output_folder is not None:
             result = self.open_output_location(self.state.output_folder)
             if not result.success:
+                logger.warning("Could not open PDF to image output folder: %s", result.message)
                 self.status_label.setText("Conversion complete, but the output folder could not be opened.")
 
     def _on_conversion_cancelled(self, paths: object) -> None:
