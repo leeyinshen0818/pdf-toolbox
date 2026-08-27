@@ -29,6 +29,7 @@ from pdf_toolbox.core.pdf_organizer import OrganizerHistory, OrganizerPage, PdfO
 from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExporter
 from pdf_toolbox.core.pdf_organizer_thumbnail import PdfOrganizerThumbnailService
 from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
+from pdf_toolbox.ui.responsive import FlowLayout
 
 
 PAGE_ID_ROLE = Qt.UserRole + 30
@@ -397,8 +398,7 @@ class PdfOrganizerPage(QWidget):
         subtitle = QLabel("Arrange, duplicate, rotate, and export PDF pages without changing the originals.")
         subtitle.setObjectName("SubtleText")
 
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar = FlowLayout(spacing=8)
         self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -423,7 +423,6 @@ class PdfOrganizerPage(QWidget):
             self.export_button,
         ]:
             toolbar.addWidget(button)
-        toolbar.addStretch(1)
 
         self.add_button.clicked.connect(self._choose_pdfs)
         self.clear_button.clicked.connect(self._clear_workspace)
@@ -448,7 +447,7 @@ class PdfOrganizerPage(QWidget):
         self.page_grid.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.page_grid)
-        self.stack.setMinimumHeight(460)
+        self.stack.setMinimumHeight(300)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)

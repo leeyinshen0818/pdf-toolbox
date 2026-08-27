@@ -45,6 +45,12 @@ from pdf_toolbox.core.pdf_geometry import (
     calculate_page_layout,
 )
 from pdf_toolbox.core.output_location import open_output_location
+from pdf_toolbox.ui.responsive import (
+    ResponsiveMode,
+    allow_horizontal_shrink,
+    clear_grid_layout,
+    responsive_mode_for_width,
+)
 
 
 PATH_ROLE = Qt.UserRole + 1
@@ -320,9 +326,11 @@ class ImageToPdfPage(QWidget):
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
         self.open_output_location = open_output_location
         self._fixed_orientation = PageOrientation.PORTRAIT
+        self._layout_mode: ResponsiveMode | None = None
 
         self._build_ui()
         self._sync_orientation_control()
+        self._apply_responsive_layout(force=True)
         self._update_state()
         self._update_preview()
 
@@ -347,8 +355,8 @@ class ImageToPdfPage(QWidget):
         toolbar.addWidget(self.clear_button)
         toolbar.addStretch(1)
 
-        content = QHBoxLayout()
-        content.setSpacing(18)
+        self.content_layout = QGridLayout()
+        self.content_layout.setSpacing(14)
 
         self.list_heading = QLabel("Imported Images")
         self.list_heading.setObjectName("PanelHeading")
@@ -360,25 +368,31 @@ class ImageToPdfPage(QWidget):
         self.image_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.image_list)
-        self.stack.setMinimumSize(330, 360)
+        self.stack.setMinimumSize(260, 260)
 
         self.preview = PreviewWidget()
+        self.preview.setMinimumSize(220, 220)
 
-        list_area = QVBoxLayout()
+        self.list_section = QWidget()
+        list_area = QVBoxLayout(self.list_section)
+        list_area.setContentsMargins(0, 0, 0, 0)
         list_area.setSpacing(8)
         list_area.addWidget(self.list_heading)
         list_area.addWidget(self.stack, 1)
 
-        preview_area = QVBoxLayout()
+        self.preview_section = QWidget()
+        preview_area = QVBoxLayout(self.preview_section)
+        preview_area.setContentsMargins(0, 0, 0, 0)
         preview_area.setSpacing(8)
         self.preview_heading = QLabel("Preview")
         self.preview_heading.setObjectName("PanelHeading")
         preview_area.addWidget(self.preview_heading)
         preview_area.addWidget(self.preview, 1)
 
-        content.addLayout(list_area, 4)
-        content.addLayout(preview_area, 4)
-        content.addWidget(self._build_settings_panel(), 3)
+        self.settings_panel = self._build_settings_panel()
+        self.content_layout.addWidget(self.list_section, 0, 0)
+        self.content_layout.addWidget(self.preview_section, 0, 1)
+        self.content_layout.addWidget(self.settings_panel, 0, 2)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("StatusText")
@@ -392,7 +406,7 @@ class ImageToPdfPage(QWidget):
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addLayout(toolbar)
-        layout.addLayout(content, 1)
+        layout.addLayout(self.content_layout, 1)
         layout.addWidget(status_frame)
 
     def _build_settings_panel(self) -> QWidget:
@@ -401,15 +415,15 @@ class ImageToPdfPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(310)
-        scroll.setMaximumWidth(390)
+        scroll.setMinimumWidth(240)
+        scroll.setMaximumWidth(380)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(300)
+        panel.setMinimumWidth(0)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(11)
 
         heading = QLabel("Settings")
         heading.setObjectName("PanelHeading")
@@ -435,8 +449,6 @@ class ImageToPdfPage(QWidget):
         self.corrections_panel = self._build_corrections_panel()
         self.corrections_panel.setVisible(False)
         layout.addWidget(self.corrections_panel)
-
-        layout.addStretch(1)
 
         self.export_button = QPushButton("Export PDF")
         self.export_button.setObjectName("PrimaryButton")
@@ -501,7 +513,7 @@ class ImageToPdfPage(QWidget):
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumHeight(36)
-        combo.setMinimumWidth(260)
+        combo.setMinimumWidth(180)
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(24)
@@ -510,6 +522,56 @@ class ImageToPdfPage(QWidget):
         combo.view().setObjectName("ComboPopup")
         combo.view().setMinimumWidth(300)
         return combo
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self, *, force: bool = False) -> None:
+        mode = responsive_mode_for_width(self._available_content_width())
+        if mode == self._layout_mode and not force:
+            return
+        self._layout_mode = mode
+        clear_grid_layout(self.content_layout)
+
+        if mode == ResponsiveMode.WIDE:
+            self.content_layout.addWidget(self.list_section, 0, 0)
+            self.content_layout.addWidget(self.preview_section, 0, 1)
+            self.content_layout.addWidget(self.settings_panel, 0, 2)
+            self.content_layout.setColumnStretch(0, 4)
+            self.content_layout.setColumnStretch(1, 4)
+            self.content_layout.setColumnStretch(2, 3)
+            self.stack.setMinimumHeight(300)
+            self.preview.setMinimumHeight(280)
+            self.settings_panel.setMaximumWidth(380)
+            return
+
+        if mode == ResponsiveMode.MEDIUM:
+            self.content_layout.addWidget(self.list_section, 0, 0)
+            self.content_layout.addWidget(self.settings_panel, 0, 1)
+            self.content_layout.addWidget(self.preview_section, 1, 0, 1, 2)
+            self.content_layout.setColumnStretch(0, 5)
+            self.content_layout.setColumnStretch(1, 3)
+            self.content_layout.setRowStretch(0, 5)
+            self.content_layout.setRowStretch(1, 3)
+            self.stack.setMinimumHeight(260)
+            self.preview.setMinimumHeight(190)
+            self.settings_panel.setMaximumWidth(360)
+            return
+
+        self.content_layout.addWidget(self.list_section, 0, 0)
+        self.content_layout.addWidget(self.preview_section, 1, 0)
+        self.content_layout.addWidget(self.settings_panel, 2, 0)
+        self.content_layout.setRowStretch(0, 5)
+        self.content_layout.setRowStretch(1, 3)
+        self.content_layout.setRowStretch(2, 2)
+        self.stack.setMinimumHeight(220)
+        self.preview.setMinimumHeight(160)
+        self.settings_panel.setMaximumWidth(16777215)
+
+    def _available_content_width(self) -> int:
+        margins = self.layout().contentsMargins()
+        return max(0, self.width() - margins.left() - margins.right())
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()

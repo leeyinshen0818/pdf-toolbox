@@ -199,10 +199,6 @@ QScrollArea#SettingsScroll > QWidget > QWidget {
     background: transparent;
 }
 
-QFrame#SettingsPanel {
-    min-width: 350px;
-}
-
 QLabel#PanelHeading {
     color: #1f2328;
     font-size: 14px;

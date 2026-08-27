@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,6 +37,12 @@ from pdf_toolbox.core.pdf_to_image import (
     PdfToImageService,
 )
 from pdf_toolbox.core.pdf_to_image_state import PdfToImageState, pdf_key
+from pdf_toolbox.ui.responsive import (
+    ResponsiveMode,
+    allow_horizontal_shrink,
+    clear_grid_layout,
+    responsive_mode_for_width,
+)
 
 
 PAGE_INDEX_ROLE = Qt.UserRole + 10
@@ -226,9 +233,11 @@ class PdfToImagePage(QWidget):
         self.conversion_thread: QThread | None = None
         self.conversion_worker: ConversionWorker | None = None
         self.open_output_location = open_output_location
+        self._layout_mode: ResponsiveMode | None = None
 
         self._build_ui()
         self._load_output_folder_setting()
+        self._apply_responsive_layout(force=True)
         self._update_state()
 
     def _build_ui(self) -> None:
@@ -252,10 +261,12 @@ class PdfToImagePage(QWidget):
         toolbar.addWidget(self.clear_button)
         toolbar.addStretch(1)
 
-        content = QHBoxLayout()
-        content.setSpacing(20)
+        self.content_layout = QGridLayout()
+        self.content_layout.setSpacing(14)
 
-        main_area = QVBoxLayout()
+        self.main_section = QWidget()
+        main_area = QVBoxLayout(self.main_section)
+        main_area.setContentsMargins(0, 0, 0, 0)
         main_area.setSpacing(12)
 
         self.pdf_info_label = QLabel("No PDF loaded")
@@ -268,13 +279,14 @@ class PdfToImagePage(QWidget):
         self.thumbnail_list.files_dropped.connect(self._add_pdf_paths)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.thumbnail_list)
-        self.stack.setMinimumHeight(420)
+        self.stack.setMinimumHeight(280)
 
         main_area.addWidget(self.pdf_info_label)
         main_area.addWidget(self.stack, 1)
 
-        content.addLayout(main_area, 1)
-        content.addWidget(self._build_settings_panel())
+        self.settings_panel = self._build_settings_panel()
+        self.content_layout.addWidget(self.main_section, 0, 0)
+        self.content_layout.addWidget(self.settings_panel, 0, 1)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("StatusText")
@@ -288,7 +300,7 @@ class PdfToImagePage(QWidget):
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addLayout(toolbar)
-        layout.addLayout(content, 1)
+        layout.addLayout(self.content_layout, 1)
         layout.addWidget(status_frame)
 
     def _build_settings_panel(self) -> QWidget:
@@ -297,15 +309,15 @@ class PdfToImagePage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(340)
-        scroll.setMaximumWidth(430)
+        scroll.setMinimumWidth(250)
+        scroll.setMaximumWidth(400)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(330)
+        panel.setMinimumWidth(0)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(11)
 
         heading = QLabel("Conversion Settings")
         heading.setObjectName("PanelHeading")
@@ -331,25 +343,22 @@ class PdfToImagePage(QWidget):
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
         self.output_folder_edit.setPlaceholderText("Choose a folder")
+        allow_horizontal_shrink(self.output_folder_edit)
         self.browse_output_folder_button = QPushButton("Browse")
+        self.browse_output_folder_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.browse_output_folder_button.clicked.connect(self._choose_output_folder)
         self.set_default_folder_button = QPushButton("Set as Default Folder")
         self.set_default_folder_button.setObjectName("SecondaryActionButton")
         self.set_default_folder_button.clicked.connect(self._set_default_output_folder)
-        output_row = QHBoxLayout()
-        output_row.setSpacing(6)
-        output_row.addWidget(self.output_folder_edit, 1)
-        output_row.addWidget(self.browse_output_folder_button)
+        self.output_folder_layout = QGridLayout()
+        self.output_folder_layout.setSpacing(6)
         layout.addWidget(output_label)
-        layout.addLayout(output_row)
-        layout.addWidget(self.set_default_folder_button)
+        layout.addLayout(self.output_folder_layout)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
-
-        layout.addStretch(1)
 
         self.convert_button = QPushButton("Convert All Pages")
         self.convert_button.setObjectName("PrimaryButton")
@@ -365,15 +374,59 @@ class PdfToImagePage(QWidget):
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumHeight(36)
-        combo.setMinimumWidth(300)
+        combo.setMinimumWidth(180)
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(18)
+        combo.setMinimumContentsLength(14)
         for item in enum_type:
             combo.addItem(item.value, item.value)
         combo.view().setObjectName("ComboPopup")
         combo.view().setMinimumWidth(320)
         return combo
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self, *, force: bool = False) -> None:
+        mode = responsive_mode_for_width(self._available_content_width())
+        if mode == self._layout_mode and not force:
+            return
+        self._layout_mode = mode
+        clear_grid_layout(self.content_layout)
+        self._apply_output_folder_layout(mode)
+
+        if mode == ResponsiveMode.WIDE:
+            self.content_layout.addWidget(self.main_section, 0, 0)
+            self.content_layout.addWidget(self.settings_panel, 0, 1)
+            self.content_layout.setColumnStretch(0, 1)
+            self.content_layout.setColumnStretch(1, 0)
+            self.stack.setMinimumHeight(320)
+            self.settings_panel.setMaximumWidth(400)
+            return
+
+        self.content_layout.addWidget(self.main_section, 0, 0)
+        self.content_layout.addWidget(self.settings_panel, 1, 0)
+        self.content_layout.setRowStretch(0, 5)
+        self.content_layout.setRowStretch(1, 2)
+        self.stack.setMinimumHeight(250)
+        self.settings_panel.setMaximumWidth(16777215)
+
+    def _apply_output_folder_layout(self, mode: ResponsiveMode) -> None:
+        clear_grid_layout(self.output_folder_layout)
+        if mode == ResponsiveMode.WIDE:
+            self.output_folder_layout.addWidget(self.output_folder_edit, 0, 0)
+            self.output_folder_layout.addWidget(self.browse_output_folder_button, 0, 1)
+            self.output_folder_layout.addWidget(self.set_default_folder_button, 1, 0, 1, 2)
+        else:
+            self.output_folder_layout.addWidget(self.output_folder_edit, 0, 0, 1, 2)
+            self.output_folder_layout.addWidget(self.browse_output_folder_button, 1, 0)
+            self.output_folder_layout.addWidget(self.set_default_folder_button, 2, 0, 1, 2)
+        self.output_folder_layout.setColumnStretch(0, 1)
+
+    def _available_content_width(self) -> int:
+        margins = self.layout().contentsMargins()
+        return max(0, self.width() - margins.left() - margins.right())
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
