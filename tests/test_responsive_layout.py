@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
 
 from pdf_toolbox.app import ensure_window_starts_maximized
 from pdf_toolbox.ui.main_window import MainWindow
@@ -55,6 +55,12 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     assert all(scroll.maximumWidth() <= 430 for scroll in settings_scrolls)
     assert all(scroll.minimumWidth() <= scroll.maximumWidth() for scroll in settings_scrolls)
 
+    window.stack.setCurrentIndex(2)
+    app.processEvents()
+    organizer_page = window.stack.widget(2)
+    assert organizer_page.export_button.text() == "Export PDF"
+    assert organizer_page.page_grid.isWrapping()
+
 
 def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
     window = MainWindow()
@@ -63,3 +69,12 @@ def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
     app.processEvents()
 
     assert bool(window.windowState() & Qt.WindowMaximized)
+
+
+def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:
+    window = MainWindow()
+    buttons = {button.text(): button for button in window.findChildren(QPushButton)}
+
+    assert buttons["PDF Organizer"].isEnabled()
+    buttons["PDF Organizer"].click()
+    assert window.stack.currentIndex() == 2

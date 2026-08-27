@@ -99,6 +99,36 @@ QListWidget#PageThumbnailList {
     padding: 8px;
 }
 
+QListWidget#OrganizerPageGrid {
+    border: 1px solid #dfe4ea;
+    border-radius: 8px;
+    background: #ffffff;
+    outline: 0;
+    padding: 10px;
+}
+
+QListWidget#OrganizerPageGrid::item {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+QListWidget#OrganizerPageGrid::item:selected {
+    background: #edf4fd;
+    border: 1px solid #8fb3df;
+}
+
+QFrame#OrganizerPageCard {
+    background: #ffffff;
+    border: 1px solid #dfe4ea;
+    border-radius: 8px;
+}
+
+QFrame#OrganizerPageCard[selected="true"] {
+    background: #edf4fd;
+    border-color: #8fb3df;
+}
+
 QListWidget#PageThumbnailList::item {
     border: 1px solid transparent;
     border-radius: 8px;
@@ -168,6 +198,17 @@ QLabel#PanelHeading {
     color: #1f2328;
     font-size: 14px;
     font-weight: 700;
+}
+
+QLabel#CardTitle {
+    color: #1f2328;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#CardMeta {
+    color: #66707c;
+    font-size: 11px;
 }
 
 QLabel#FieldLabel {

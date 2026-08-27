@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
+from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
 from pdf_toolbox.ui.styles import APP_STYLE
 
@@ -34,7 +35,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.addWidget(ImageToPdfPage())
         self.stack.addWidget(PdfToImagePage())
-        self.stack.addWidget(self._placeholder_page("PDF Organizer", "Reserved for Phase 3."))
+        self.stack.addWidget(PdfOrganizerPage())
 
         layout.addWidget(sidebar)
         layout.addWidget(self.stack, 1)
@@ -72,7 +73,8 @@ class MainWindow(QMainWindow):
         organizer = QPushButton("PDF Organizer")
         organizer.setObjectName("NavButton")
         organizer.setCheckable(True)
-        organizer.setEnabled(False)
+        organizer.clicked.connect(lambda: self.stack.setCurrentIndex(2))
+        button_group.addButton(organizer)
 
         layout.addWidget(title)
         layout.addSpacing(12)
