@@ -67,7 +67,8 @@ def test_organizer_grid_shows_all_pages_with_source_metadata(app: QApplication, 
     card = page.page_grid.itemWidget(page.page_grid.item(2))
     labels = [label.text() for label in card.findChildren(QLabel)]
     assert "Page 3" in labels
-    assert "second.pdf - Original page 1" in labels
+    assert "second.pdf" in labels
+    assert "Original page 1" in labels
 
 
 def test_reorder_updates_workspace_order(app: QApplication, tmp_path: Path) -> None:

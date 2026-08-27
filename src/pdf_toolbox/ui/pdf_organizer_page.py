@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -30,7 +32,7 @@ from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
 
 PAGE_ID_ROLE = Qt.UserRole + 30
 THUMBNAIL_SIZE = QSize(136, 176)
-CARD_SIZE = QSize(190, 250)
+CARD_SIZE = QSize(190, 282)
 
 
 class OrganizerDropArea(QFrame):
@@ -87,19 +89,115 @@ class OrganizerPageGrid(QListWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._drag_start_global_pos = None
+        self._drag_start_item: QListWidgetItem | None = None
+        self._dragging_item: QListWidgetItem | None = None
         self.setObjectName("OrganizerPageGrid")
         self.setAcceptDrops(True)
-        self.setDragEnabled(True)
+        self.setDragEnabled(False)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QListWidget.InternalMove)
+        self.setDragDropMode(QAbstractItemView.NoDragDrop)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setViewMode(QListWidget.IconMode)
+        self.setFlow(QListView.LeftToRight)
         self.setResizeMode(QListWidget.Adjust)
         self.setMovement(QListWidget.Snap)
         self.setSelectionMode(QListWidget.ExtendedSelection)
         self.setWrapping(True)
-        self.setSpacing(10)
+        self.setGridSize(CARD_SIZE)
+        self.setSpacing(14)
         self.setUniformItemSizes(True)
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(72)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.setMouseTracking(True)
+
+    def register_drag_widgets(self, card: "PageCardWidget") -> None:
+        card.installEventFilter(self)
+        for label in card.findChildren(QLabel):
+            label.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.LeftButton:
+            viewport_pos = watched.mapTo(self.viewport(), event.position().toPoint())
+            item = self.itemAt(viewport_pos)
+            if item is not None:
+                self._drag_start_global_pos = event.globalPosition().toPoint()
+                self._drag_start_item = item
+                if event.modifiers() & Qt.ControlModifier:
+                    item.setSelected(not item.isSelected())
+                elif not item.isSelected():
+                    self.clearSelection()
+                    item.setSelected(True)
+                self.setCurrentItem(item)
+            return False
+
+        if (
+            event.type() == QEvent.Type.MouseMove
+            and self._drag_start_item is not None
+            and event.buttons() & Qt.LeftButton
+        ):
+            distance = (event.globalPosition().toPoint() - self._drag_start_global_pos).manhattanLength()
+            if distance >= QApplication.startDragDistance():
+                self._dragging_item = self._drag_start_item
+                self.viewport().setCursor(Qt.ClosedHandCursor)
+                viewport_pos = watched.mapTo(self.viewport(), event.position().toPoint())
+                self._auto_scroll_for_drag(viewport_pos)
+                return True
+
+        if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.LeftButton:
+            viewport_pos = watched.mapTo(self.viewport(), event.position().toPoint())
+            if self._dragging_item is not None:
+                self._finish_card_drag(viewport_pos)
+                self.viewport().unsetCursor()
+                return True
+            self._drag_start_item = None
+            self._drag_start_global_pos = None
+        return super().eventFilter(watched, event)
+
+    def _auto_scroll_for_drag(self, viewport_pos) -> None:
+        bar = self.verticalScrollBar()
+        margin = self.autoScrollMargin()
+        step = 18
+        if viewport_pos.y() < margin:
+            bar.setValue(bar.value() - step)
+        elif viewport_pos.y() > self.viewport().height() - margin:
+            bar.setValue(bar.value() + step)
+
+    def _finish_card_drag(self, viewport_pos) -> None:
+        dragged = self._dragging_item
+        self._dragging_item = None
+        self._drag_start_item = None
+        self._drag_start_global_pos = None
+        if dragged is None:
+            return
+
+        before = self.page_ids()
+        dragged_id = dragged.data(PAGE_ID_ROLE)
+        from_index = before.index(dragged_id)
+        to_index = self._drop_index_for_position(viewport_pos)
+        if to_index > from_index:
+            to_index -= 1
+        to_index = max(0, min(to_index, len(before) - 1))
+        if to_index == from_index:
+            return
+
+        after = before[:]
+        moved = after.pop(from_index)
+        after.insert(to_index, moved)
+        self.order_changed.emit(before, after)
+
+    def _drop_index_for_position(self, viewport_pos) -> int:
+        target = self.itemAt(viewport_pos)
+        if target is None:
+            return self.count()
+        target_index = self.row(target)
+        rect = self.visualItemRect(target)
+        if viewport_pos.x() > rect.center().x():
+            return target_index + 1
+        return target_index
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -143,11 +241,12 @@ class PageCardWidget(QFrame):
         super().__init__()
         self.setObjectName("OrganizerPageCard")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setFixedSize(CARD_SIZE)
         self.page_id = page.page_id
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 10)
-        layout.setSpacing(7)
+        layout.setContentsMargins(10, 8, 10, 9)
+        layout.setSpacing(6)
 
         header = QHBoxLayout()
         page_label = QLabel(f"Page {workspace_number}")
@@ -167,21 +266,43 @@ class PageCardWidget(QFrame):
         self.thumbnail.setAlignment(Qt.AlignCenter)
         self.thumbnail.setPixmap(thumbnail_placeholder("Loading"))
 
-        source = QLabel(page.source_label)
+        source = ElidedLabel(page.source_filename)
         source.setObjectName("CardMeta")
-        source.setWordWrap(True)
+        source.setFixedHeight(18)
+
+        original_page = QLabel(f"Original page {page.source_page_index + 1}")
+        original_page.setObjectName("CardMeta")
+        original_page.setFixedHeight(16)
 
         rotation = QLabel("" if page.rotation == 0 else f"Rotated {page.rotation} deg")
         rotation.setObjectName("CardMeta")
+        rotation.setFixedHeight(16)
 
         layout.addLayout(header)
         layout.addWidget(self.thumbnail, alignment=Qt.AlignCenter)
         layout.addWidget(source)
+        layout.addWidget(original_page)
         layout.addWidget(rotation)
         layout.addStretch(1)
 
     def set_thumbnail(self, pixmap: QPixmap) -> None:
         self.thumbnail.setPixmap(pixmap)
+
+
+class ElidedLabel(QLabel):
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.full_text = text
+        self.setToolTip(text)
+        self.setText(text)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        available_width = max(24, self.width())
+        self.setText(self.fontMetrics().elidedText(self.full_text, Qt.ElideMiddle, available_width))
 
 
 class OrganizerThumbnailWorker(QObject):
@@ -402,28 +523,36 @@ class PdfOrganizerPage(QWidget):
 
     def _rebuild_grid(self, selected_ids: set[str] | None = None) -> None:
         selected = selected_ids or self._selected_page_ids()
-        self.page_grid.clear()
-        for position, page in enumerate(self.workspace.pages, start=1):
-            item = QListWidgetItem()
-            item.setData(PAGE_ID_ROLE, page.page_id)
-            item.setSizeHint(CARD_SIZE)
-            self.page_grid.addItem(item)
+        self.page_grid.setUpdatesEnabled(False)
+        try:
+            self.page_grid.clear()
+            for position, page in enumerate(self.workspace.pages, start=1):
+                item = QListWidgetItem()
+                item.setData(PAGE_ID_ROLE, page.page_id)
+                item.setSizeHint(CARD_SIZE)
+                self.page_grid.addItem(item)
 
-            card = PageCardWidget(page, position)
-            card.delete_requested.connect(self._delete_one)
-            pixmap = self.thumbnail_cache.get(page.thumbnail_key)
-            if pixmap is not None:
-                card.set_thumbnail(pixmap)
-            self.page_grid.setItemWidget(item, card)
-            item.setSelected(page.page_id in selected)
+                card = PageCardWidget(page, position)
+                card.delete_requested.connect(self._delete_one)
+                self.page_grid.register_drag_widgets(card)
+                pixmap = self.thumbnail_cache.get(page.thumbnail_key)
+                if pixmap is not None:
+                    card.set_thumbnail(pixmap)
+                self.page_grid.setItemWidget(item, card)
+                item.setSelected(page.page_id in selected)
+        finally:
+            self.page_grid.setUpdatesEnabled(True)
         self._sync_card_selection()
 
     def _start_thumbnail_worker(self) -> None:
-        requests = tuple(
-            (page.page_id, page.thumbnail_key, page.source_path, page.source_page_index, page.rotation)
-            for page in self.workspace.pages
-            if page.thumbnail_key not in self.thumbnail_cache
-        )
+        missing_keys: set[tuple[str, int, int]] = set()
+        requests_list: list[tuple[str, tuple[str, int, int], Path, int, int]] = []
+        for page in self.workspace.pages:
+            if page.thumbnail_key in self.thumbnail_cache or page.thumbnail_key in missing_keys:
+                continue
+            missing_keys.add(page.thumbnail_key)
+            requests_list.append((page.page_id, page.thumbnail_key, page.source_path, page.source_page_index, page.rotation))
+        requests = tuple(requests_list)
         if not requests:
             return
         self._stop_thumbnail_worker()
@@ -454,13 +583,18 @@ class PdfOrganizerPage(QWidget):
     def _on_thumbnail_ready(self, page_id: str, cache_key: object, data: bytes) -> None:
         pixmap = thumbnail_from_png_bytes(data)
         self.thumbnail_cache[cache_key] = pixmap
-        self._set_page_thumbnail(page_id, pixmap)
+        self._set_matching_page_thumbnails(cache_key, pixmap)
 
     def _on_thumbnail_failed(self, page_id: str, cache_key: object) -> None:
         pixmap = thumbnail_placeholder("Preview\nunavailable")
         self.thumbnail_cache[cache_key] = pixmap
-        self._set_page_thumbnail(page_id, pixmap)
+        self._set_matching_page_thumbnails(cache_key, pixmap)
         self.status_label.setText("Some page thumbnails could not be generated.")
+
+    def _set_matching_page_thumbnails(self, cache_key: object, pixmap: QPixmap) -> None:
+        for page in self.workspace.pages:
+            if page.thumbnail_key == cache_key:
+                self._set_page_thumbnail(page.page_id, pixmap)
 
     def _set_page_thumbnail(self, page_id: str, pixmap: QPixmap) -> None:
         item = self._item_for_page(page_id)
