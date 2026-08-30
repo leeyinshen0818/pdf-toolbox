@@ -19,7 +19,8 @@ from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
-from pdf_toolbox.ui.styles import APP_STYLE
+from pdf_toolbox.ui.scale import scaled, ui_scale
+from pdf_toolbox.ui.styles import build_app_style
 
 
 class MainWindow(QMainWindow):
@@ -29,8 +30,8 @@ class MainWindow(QMainWindow):
         icon_path = app_icon_path()
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.resize(1040, 720)
-        self.setMinimumSize(960, 640)
+        self.resize(scaled(1040), scaled(720))
+        self.setMinimumSize(scaled(960), scaled(640))
 
         root = QWidget()
         root.setObjectName("Root")
@@ -49,16 +50,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stack, 1)
 
         self.setCentralWidget(root)
-        self.setStyleSheet(APP_STYLE)
+        self.setStyleSheet(build_app_style(ui_scale()))
 
     def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setMinimumWidth(170)
-        sidebar.setMaximumWidth(220)
+        sidebar.setMinimumWidth(scaled(190))
+        sidebar.setMaximumWidth(scaled(230))
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(scaled(16), scaled(20), scaled(16), scaled(20))
+        layout.setSpacing(scaled(10))
 
         title = QLabel("PDF Toolbox")
         title.setObjectName("SidebarTitle")
@@ -91,7 +92,7 @@ class MainWindow(QMainWindow):
         button_group.addButton(heic_to_jpg)
 
         layout.addWidget(title)
-        layout.addSpacing(12)
+        layout.addSpacing(scaled(12))
         layout.addWidget(image_to_pdf)
         layout.addWidget(pdf_to_image)
         layout.addWidget(organizer)

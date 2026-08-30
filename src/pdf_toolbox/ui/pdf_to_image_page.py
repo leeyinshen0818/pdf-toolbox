@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -37,19 +36,14 @@ from pdf_toolbox.core.pdf_to_image import (
     PdfToImageService,
 )
 from pdf_toolbox.core.pdf_to_image_state import PdfToImageState, pdf_key
-from pdf_toolbox.ui.responsive import (
-    ResponsiveMode,
-    allow_horizontal_shrink,
-    clear_grid_layout,
-    responsive_mode_for_width,
-)
+from pdf_toolbox.ui.scale import scaled, scaled_size
 
 
 PAGE_INDEX_ROLE = Qt.UserRole + 10
 SOURCE_KEY_ROLE = Qt.UserRole + 11
 OUTPUT_FOLDER_SETTING = "pdf_to_image/output_folder"
-THUMBNAIL_ICON_SIZE = QSize(140, 180)
-THUMBNAIL_PAGE_MAX_SIZE = QSize(122, 158)
+THUMBNAIL_ICON_SIZE = scaled_size(140, 180, minimum=95)
+THUMBNAIL_PAGE_MAX_SIZE = scaled_size(122, 158, minimum=83)
 logger = logging.getLogger(__name__)
 
 
@@ -63,11 +57,13 @@ class PdfDropArea(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(8)
+        layout.setSpacing(scaled(8, minimum=5))
 
         title = QLabel("Add PDF files to convert pages into images")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
+        title.setStyleSheet(
+            f"font-size: {scaled(18, minimum=12)}px; font-weight: 700; color: #2f3742; border: none;"
+        )
         hint = QLabel("You can add multiple PDF files.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
@@ -118,7 +114,7 @@ class PageThumbnailList(QListWidget):
         self.setMovement(QListWidget.Static)
         self.setSelectionMode(QListWidget.NoSelection)
         self.setWrapping(True)
-        self.setSpacing(10)
+        self.setSpacing(scaled(10, minimum=6))
         self.setIconSize(THUMBNAIL_ICON_SIZE)
         self.setUniformItemSizes(True)
 
@@ -233,25 +229,23 @@ class PdfToImagePage(QWidget):
         self.conversion_thread: QThread | None = None
         self.conversion_worker: ConversionWorker | None = None
         self.open_output_location = open_output_location
-        self._layout_mode: ResponsiveMode | None = None
 
         self._build_ui()
         self._load_output_folder_setting()
-        self._apply_responsive_layout(force=True)
         self._update_state()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 26, 34, 22)
-        layout.setSpacing(13)
+        layout.setContentsMargins(scaled(32), scaled(26), scaled(34), scaled(22))
+        layout.setSpacing(scaled(13))
 
         title = QLabel("PDF -> Image")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #1f2328;")
+        title.setStyleSheet(f"font-size: {scaled(22, minimum=15)}px; font-weight: 700; color: #1f2328;")
         subtitle = QLabel("Convert every page from uploaded PDFs into JPG or PNG images.")
         subtitle.setObjectName("SubtleText")
 
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar.setSpacing(scaled(8))
         self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -261,13 +255,13 @@ class PdfToImagePage(QWidget):
         toolbar.addWidget(self.clear_button)
         toolbar.addStretch(1)
 
-        self.content_layout = QGridLayout()
-        self.content_layout.setSpacing(14)
+        self.content_layout = QHBoxLayout()
+        self.content_layout.setSpacing(scaled(18))
 
         self.main_section = QWidget()
         main_area = QVBoxLayout(self.main_section)
         main_area.setContentsMargins(0, 0, 0, 0)
-        main_area.setSpacing(12)
+        main_area.setSpacing(scaled(12))
 
         self.pdf_info_label = QLabel("No PDF loaded")
         self.pdf_info_label.setObjectName("SubtleText")
@@ -279,14 +273,14 @@ class PdfToImagePage(QWidget):
         self.thumbnail_list.files_dropped.connect(self._add_pdf_paths)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.thumbnail_list)
-        self.stack.setMinimumHeight(280)
+        self.stack.setMinimumSize(scaled(520, minimum=354), scaled(420, minimum=285))
 
         main_area.addWidget(self.pdf_info_label)
         main_area.addWidget(self.stack, 1)
 
         self.settings_panel = self._build_settings_panel()
-        self.content_layout.addWidget(self.main_section, 0, 0)
-        self.content_layout.addWidget(self.settings_panel, 0, 1)
+        self.content_layout.addWidget(self.main_section, 1)
+        self.content_layout.addWidget(self.settings_panel)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("StatusText")
@@ -294,7 +288,7 @@ class PdfToImagePage(QWidget):
         status_frame = QFrame()
         status_frame.setObjectName("StatusBar")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(10, 7, 10, 7)
+        status_layout.setContentsMargins(scaled(10), scaled(7), scaled(10), scaled(7))
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(title)
@@ -309,15 +303,15 @@ class PdfToImagePage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(250)
-        scroll.setMaximumWidth(400)
+        scroll.setMinimumWidth(scaled(340, minimum=230))
+        scroll.setMaximumWidth(scaled(430, minimum=292))
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(0)
+        panel.setMinimumWidth(scaled(330, minimum=224))
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(11)
+        layout.setContentsMargins(scaled(18), scaled(18), scaled(18), scaled(18))
+        layout.setSpacing(scaled(14))
 
         heading = QLabel("Conversion Settings")
         heading.setObjectName("PanelHeading")
@@ -343,17 +337,21 @@ class PdfToImagePage(QWidget):
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
         self.output_folder_edit.setPlaceholderText("Choose a folder")
-        allow_horizontal_shrink(self.output_folder_edit)
+        self.output_folder_edit.setMinimumWidth(scaled(150, minimum=100))
+        self.output_folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.browse_output_folder_button = QPushButton("Browse")
         self.browse_output_folder_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.browse_output_folder_button.clicked.connect(self._choose_output_folder)
         self.set_default_folder_button = QPushButton("Set as Default Folder")
         self.set_default_folder_button.setObjectName("SecondaryActionButton")
         self.set_default_folder_button.clicked.connect(self._set_default_output_folder)
-        self.output_folder_layout = QGridLayout()
-        self.output_folder_layout.setSpacing(6)
+        output_row = QHBoxLayout()
+        output_row.setSpacing(scaled(6))
+        output_row.addWidget(self.output_folder_edit, 1)
+        output_row.addWidget(self.browse_output_folder_button)
         layout.addWidget(output_label)
-        layout.addLayout(self.output_folder_layout)
+        layout.addLayout(output_row)
+        layout.addWidget(self.set_default_folder_button)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -373,64 +371,20 @@ class PdfToImagePage(QWidget):
 
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
-        combo.setMinimumHeight(36)
-        combo.setMinimumWidth(180)
+        combo.setMinimumHeight(scaled(36, minimum=24))
+        combo.setMinimumWidth(scaled(260, minimum=177))
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(14)
         for item in enum_type:
             combo.addItem(item.value, item.value)
         combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(320)
+        combo.view().setMinimumWidth(scaled(320, minimum=218))
         return combo
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._apply_responsive_layout()
-
-    def _apply_responsive_layout(self, *, force: bool = False) -> None:
-        mode = responsive_mode_for_width(self._available_content_width())
-        if mode == self._layout_mode and not force:
-            return
-        self._layout_mode = mode
-        clear_grid_layout(self.content_layout)
-        self._apply_output_folder_layout(mode)
-
-        if mode == ResponsiveMode.WIDE:
-            self.content_layout.addWidget(self.main_section, 0, 0)
-            self.content_layout.addWidget(self.settings_panel, 0, 1)
-            self.content_layout.setColumnStretch(0, 1)
-            self.content_layout.setColumnStretch(1, 0)
-            self.stack.setMinimumHeight(320)
-            self.settings_panel.setMaximumWidth(400)
-            return
-
-        self.content_layout.addWidget(self.main_section, 0, 0)
-        self.content_layout.addWidget(self.settings_panel, 1, 0)
-        self.content_layout.setRowStretch(0, 5)
-        self.content_layout.setRowStretch(1, 2)
-        self.stack.setMinimumHeight(250)
-        self.settings_panel.setMaximumWidth(16777215)
-
-    def _apply_output_folder_layout(self, mode: ResponsiveMode) -> None:
-        clear_grid_layout(self.output_folder_layout)
-        if mode == ResponsiveMode.WIDE:
-            self.output_folder_layout.addWidget(self.output_folder_edit, 0, 0)
-            self.output_folder_layout.addWidget(self.browse_output_folder_button, 0, 1)
-            self.output_folder_layout.addWidget(self.set_default_folder_button, 1, 0, 1, 2)
-        else:
-            self.output_folder_layout.addWidget(self.output_folder_edit, 0, 0, 1, 2)
-            self.output_folder_layout.addWidget(self.browse_output_folder_button, 1, 0)
-            self.output_folder_layout.addWidget(self.set_default_folder_button, 2, 0, 1, 2)
-        self.output_folder_layout.setColumnStretch(0, 1)
-
-    def _available_content_width(self) -> int:
-        margins = self.layout().contentsMargins()
-        return max(0, self.width() - margins.left() - margins.right())
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(4)
+        layout.setSpacing(scaled(4, minimum=2))
         text = QLabel(label)
         text.setObjectName("FieldLabel")
         layout.addWidget(text)
@@ -497,7 +451,7 @@ class PdfToImagePage(QWidget):
                 item.setData(SOURCE_KEY_ROLE, document.source_key)
                 item.setData(PAGE_INDEX_ROLE, page_index)
                 item.setIcon(self.thumbnail_cache.get((document.source_key, page_index), placeholder))
-                item.setSizeHint(QSize(184, 230))
+                item.setSizeHint(scaled_size(184, 230, minimum=125))
                 self.thumbnail_list.addItem(item)
 
     def _start_thumbnail_worker(self, source_keys: list[str] | None = None) -> None:
@@ -762,8 +716,13 @@ def thumbnail_placeholder(text: str) -> QPixmap:
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.Antialiasing)
     painter.fillRect(canvas.rect(), QColor("#f8fafc"))
-    page_rect = QRect(13, 12, THUMBNAIL_ICON_SIZE.width() - 26, THUMBNAIL_ICON_SIZE.height() - 34)
-    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(0, 0, 0, 14))
+    page_rect = QRect(
+        scaled(13),
+        scaled(12),
+        THUMBNAIL_ICON_SIZE.width() - scaled(26),
+        THUMBNAIL_ICON_SIZE.height() - scaled(34),
+    )
+    painter.fillRect(page_rect.adjusted(scaled(3), scaled(3), scaled(3), scaled(3)), QColor(0, 0, 0, 14))
     painter.fillRect(page_rect, QColor("#ffffff"))
     painter.setPen(QPen(QColor("#d7dee8"), 1))
     painter.drawRect(page_rect)
@@ -780,13 +739,13 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
     painter.fillRect(canvas.rect(), QColor("#f8fafc"))
 
-    scaled = source.scaled(THUMBNAIL_PAGE_MAX_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    x = (THUMBNAIL_ICON_SIZE.width() - scaled.width()) // 2
-    y = (THUMBNAIL_ICON_SIZE.height() - scaled.height()) // 2
-    page_rect = QRect(x, y, scaled.width(), scaled.height())
-    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(0, 0, 0, 14))
+    thumbnail = source.scaled(THUMBNAIL_PAGE_MAX_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    x = (THUMBNAIL_ICON_SIZE.width() - thumbnail.width()) // 2
+    y = (THUMBNAIL_ICON_SIZE.height() - thumbnail.height()) // 2
+    page_rect = QRect(x, y, thumbnail.width(), thumbnail.height())
+    painter.fillRect(page_rect.adjusted(scaled(3), scaled(3), scaled(3), scaled(3)), QColor(0, 0, 0, 14))
     painter.fillRect(page_rect, QColor("#ffffff"))
-    painter.drawPixmap(page_rect.topLeft(), scaled)
+    painter.drawPixmap(page_rect.topLeft(), thumbnail)
     painter.setPen(QPen(QColor("#cfd7e2"), 1))
     painter.drawRect(page_rect)
     painter.end()

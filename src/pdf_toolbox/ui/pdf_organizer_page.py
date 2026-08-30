@@ -29,12 +29,12 @@ from pdf_toolbox.core.pdf_organizer import OrganizerHistory, OrganizerPage, PdfO
 from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExporter
 from pdf_toolbox.core.pdf_organizer_thumbnail import PdfOrganizerThumbnailService
 from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
-from pdf_toolbox.ui.responsive import FlowLayout
+from pdf_toolbox.ui.scale import scaled, scaled_size
 
 
 PAGE_ID_ROLE = Qt.UserRole + 30
-THUMBNAIL_SIZE = QSize(136, 176)
-CARD_SIZE = QSize(190, 282)
+THUMBNAIL_SIZE = scaled_size(136, 176, minimum=92)
+CARD_SIZE = scaled_size(190, 282, minimum=129)
 logger = logging.getLogger(__name__)
 
 
@@ -48,11 +48,13 @@ class OrganizerDropArea(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(8)
+        layout.setSpacing(scaled(8, minimum=5))
 
         title = QLabel("Add PDFs to start organizing pages")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
+        title.setStyleSheet(
+            f"font-size: {scaled(18, minimum=12)}px; font-weight: 700; color: #2f3742; border: none;"
+        )
         hint = QLabel("Drop one or more PDF files here.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
@@ -114,10 +116,10 @@ class OrganizerPageGrid(QListWidget):
         self.setSelectionMode(QListWidget.ExtendedSelection)
         self.setWrapping(True)
         self.setGridSize(CARD_SIZE)
-        self.setSpacing(14)
+        self.setSpacing(scaled(14, minimum=9))
         self.setUniformItemSizes(True)
         self.setAutoScroll(True)
-        self.setAutoScrollMargin(72)
+        self.setAutoScrollMargin(scaled(72, minimum=49))
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -256,8 +258,8 @@ class PageCardWidget(QFrame):
         self.page_id = page.page_id
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 9)
-        layout.setSpacing(6)
+        layout.setContentsMargins(scaled(10), scaled(8), scaled(10), scaled(9))
+        layout.setSpacing(scaled(6, minimum=4))
 
         header = QHBoxLayout()
         page_label = QLabel(f"Page {workspace_number}")
@@ -265,7 +267,7 @@ class PageCardWidget(QFrame):
         delete_button = QPushButton()
         delete_button.setObjectName("IconButton")
         delete_button.setToolTip("Remove page")
-        delete_button.setFixedSize(28, 28)
+        delete_button.setFixedSize(scaled_size(28, 28, minimum=20))
         delete_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
         delete_button.clicked.connect(lambda: self.delete_requested.emit(self.page_id))
         header.addWidget(page_label)
@@ -279,15 +281,15 @@ class PageCardWidget(QFrame):
 
         source = ElidedLabel(page.source_filename)
         source.setObjectName("CardMeta")
-        source.setFixedHeight(18)
+        source.setFixedHeight(scaled(18, minimum=12))
 
         original_page = QLabel(f"Original page {page.source_page_index + 1}")
         original_page.setObjectName("CardMeta")
-        original_page.setFixedHeight(16)
+        original_page.setFixedHeight(scaled(16, minimum=11))
 
         rotation = QLabel("" if page.rotation == 0 else f"Rotated {page.rotation} deg")
         rotation.setObjectName("CardMeta")
-        rotation.setFixedHeight(16)
+        rotation.setFixedHeight(scaled(16, minimum=11))
 
         layout.addLayout(header)
         layout.addWidget(self.thumbnail, alignment=Qt.AlignCenter)
@@ -390,15 +392,16 @@ class PdfOrganizerPage(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 26, 34, 22)
-        layout.setSpacing(13)
+        layout.setContentsMargins(scaled(32), scaled(26), scaled(34), scaled(22))
+        layout.setSpacing(scaled(13))
 
         title = QLabel("PDF Organizer")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #1f2328;")
+        title.setStyleSheet(f"font-size: {scaled(22, minimum=15)}px; font-weight: 700; color: #1f2328;")
         subtitle = QLabel("Arrange, duplicate, rotate, and export PDF pages without changing the originals.")
         subtitle.setObjectName("SubtleText")
 
-        toolbar = FlowLayout(spacing=8)
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(scaled(8))
         self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -423,6 +426,7 @@ class PdfOrganizerPage(QWidget):
             self.export_button,
         ]:
             toolbar.addWidget(button)
+        toolbar.addStretch(1)
 
         self.add_button.clicked.connect(self._choose_pdfs)
         self.clear_button.clicked.connect(self._clear_workspace)
@@ -447,7 +451,7 @@ class PdfOrganizerPage(QWidget):
         self.page_grid.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.page_grid)
-        self.stack.setMinimumHeight(300)
+        self.stack.setMinimumHeight(scaled(460, minimum=313))
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -459,7 +463,7 @@ class PdfOrganizerPage(QWidget):
         status_frame = QFrame()
         status_frame.setObjectName("StatusBar")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(10, 7, 10, 7)
+        status_layout.setContentsMargins(scaled(10), scaled(7), scaled(10), scaled(7))
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(title)
@@ -855,7 +859,7 @@ def thumbnail_placeholder(text: str) -> QPixmap:
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.Antialiasing)
     painter.fillRect(canvas.rect(), QColor("#f8fafc"))
-    page_rect = canvas.rect().adjusted(12, 10, -12, -10)
+    page_rect = canvas.rect().adjusted(scaled(12), scaled(10), -scaled(12), -scaled(10))
     painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(0, 0, 0, 14))
     painter.fillRect(page_rect, QColor("#ffffff"))
     painter.setPen(QPen(QColor("#d7dee8"), 1))
@@ -872,14 +876,18 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
     painter.fillRect(canvas.rect(), QColor("#f8fafc"))
-    scaled = source.scaled(canvas.size().boundedTo(QSize(122, 162)), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    x = (canvas.width() - scaled.width()) // 2
-    y = (canvas.height() - scaled.height()) // 2
-    painter.fillRect(x + 3, y + 3, scaled.width(), scaled.height(), QColor(0, 0, 0, 14))
-    painter.fillRect(x, y, scaled.width(), scaled.height(), QColor("#ffffff"))
-    painter.drawPixmap(x, y, scaled)
+    thumbnail = source.scaled(
+        canvas.size().boundedTo(scaled_size(122, 162, minimum=83)),
+        Qt.KeepAspectRatio,
+        Qt.SmoothTransformation,
+    )
+    x = (canvas.width() - thumbnail.width()) // 2
+    y = (canvas.height() - thumbnail.height()) // 2
+    painter.fillRect(x + scaled(3), y + scaled(3), thumbnail.width(), thumbnail.height(), QColor(0, 0, 0, 14))
+    painter.fillRect(x, y, thumbnail.width(), thumbnail.height(), QColor("#ffffff"))
+    painter.drawPixmap(x, y, thumbnail)
     painter.setPen(QPen(QColor("#cfd7e2"), 1))
-    painter.drawRect(x, y, scaled.width(), scaled.height())
+    painter.drawRect(x, y, thumbnail.width(), thumbnail.height())
     painter.end()
     return canvas
 

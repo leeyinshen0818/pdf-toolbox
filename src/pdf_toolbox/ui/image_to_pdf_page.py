@@ -45,12 +45,7 @@ from pdf_toolbox.core.pdf_geometry import (
     calculate_page_layout,
 )
 from pdf_toolbox.core.output_location import open_output_location
-from pdf_toolbox.ui.responsive import (
-    ResponsiveMode,
-    allow_horizontal_shrink,
-    clear_grid_layout,
-    responsive_mode_for_width,
-)
+from pdf_toolbox.ui.scale import scaled, scaled_size
 
 
 PATH_ROLE = Qt.UserRole + 1
@@ -71,11 +66,11 @@ class ImageListWidget(QListWidget):
         self.setDragDropMode(QListWidget.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QListWidget.ExtendedSelection)
-        self.setSpacing(5)
+        self.setSpacing(scaled(5, minimum=3))
         self.setUniformItemSizes(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setAutoScroll(True)
-        self.setAutoScrollMargin(48)
+        self.setAutoScrollMargin(scaled(48, minimum=32))
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -152,19 +147,19 @@ class ImageRowWidget(QWidget):
         self.setObjectName("ImageRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.path = str(entry.path)
-        self.setMinimumHeight(76)
+        self.setMinimumHeight(scaled(76, minimum=52))
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(9)
+        layout.setContentsMargins(scaled(8), scaled(6), scaled(8), scaled(6))
+        layout.setSpacing(scaled(9))
 
         order_label = QLabel(str(order_number))
         order_label.setObjectName("ImageOrderNumber")
-        order_label.setFixedWidth(24)
+        order_label.setFixedWidth(scaled(24, minimum=18))
         order_label.setAlignment(Qt.AlignCenter)
 
         thumbnail_label = QLabel()
-        thumbnail_label.setFixedSize(58, 58)
+        thumbnail_label.setFixedSize(scaled(58, minimum=40), scaled(58, minimum=40))
         thumbnail_label.setAlignment(Qt.AlignCenter)
         thumbnail_label.setPixmap(thumbnail)
         thumbnail_label.setStyleSheet(
@@ -173,7 +168,7 @@ class ImageRowWidget(QWidget):
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(4)
+        text_layout.setSpacing(scaled(4))
 
         filename = ElidedLabel(entry.filename)
         filename.setObjectName("ImageName")
@@ -188,9 +183,9 @@ class ImageRowWidget(QWidget):
         delete_button = QPushButton()
         delete_button.setObjectName("IconButton")
         delete_button.setToolTip("Remove image")
-        delete_button.setFixedSize(28, 28)
+        delete_button.setFixedSize(scaled(28, minimum=22), scaled(28, minimum=22))
         delete_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
-        delete_button.setIconSize(QSize(16, 16))
+        delete_button.setIconSize(scaled_size(16, 16, minimum=12))
         delete_button.clicked.connect(lambda: self.delete_requested.emit(self.path))
 
         layout.addWidget(order_label)
@@ -217,7 +212,7 @@ class PreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumSize(280, 360)
+        self.setMinimumSize(scaled(280, minimum=190), scaled(360, minimum=245))
         self._pixmap: QPixmap | None = None
         self._image_size: tuple[int, int] | None = None
         self._settings = ExportSettings()
@@ -254,7 +249,8 @@ class PreviewWidget(QWidget):
         layout = self.current_layout()
         if layout is None:
             return
-        available = self.rect().adjusted(18, 18, -18, -18)
+        inset = scaled(18, minimum=10)
+        available = self.rect().adjusted(inset, inset, -inset, -inset)
         scale = min(available.width() / layout.page_size.width, available.height() / layout.page_size.height)
         page_width = layout.page_size.width * scale
         page_height = layout.page_size.height * scale
@@ -326,26 +322,24 @@ class ImageToPdfPage(QWidget):
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
         self.open_output_location = open_output_location
         self._fixed_orientation = PageOrientation.PORTRAIT
-        self._layout_mode: ResponsiveMode | None = None
 
         self._build_ui()
         self._sync_orientation_control()
-        self._apply_responsive_layout(force=True)
         self._update_state()
         self._update_preview()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 26, 34, 22)
-        layout.setSpacing(13)
+        layout.setContentsMargins(scaled(32), scaled(26), scaled(34), scaled(22))
+        layout.setSpacing(scaled(13))
 
         title = QLabel("Image -> PDF")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #1f2328;")
+        title.setStyleSheet(f"font-size: {scaled(22, minimum=15)}px; font-weight: 700; color: #1f2328;")
         subtitle = QLabel("Import images, arrange their order, and export them as one PDF.")
         subtitle.setObjectName("SubtleText")
 
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar.setSpacing(scaled(8))
         self.add_button = QPushButton("Add Images")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -355,8 +349,8 @@ class ImageToPdfPage(QWidget):
         toolbar.addWidget(self.clear_button)
         toolbar.addStretch(1)
 
-        self.content_layout = QGridLayout()
-        self.content_layout.setSpacing(14)
+        self.content_layout = QHBoxLayout()
+        self.content_layout.setSpacing(scaled(18))
 
         self.list_heading = QLabel("Imported Images")
         self.list_heading.setObjectName("PanelHeading")
@@ -368,31 +362,30 @@ class ImageToPdfPage(QWidget):
         self.image_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.image_list)
-        self.stack.setMinimumSize(260, 260)
+        self.stack.setMinimumSize(scaled(330, minimum=225), scaled(360, minimum=245))
 
         self.preview = PreviewWidget()
-        self.preview.setMinimumSize(220, 220)
 
         self.list_section = QWidget()
         list_area = QVBoxLayout(self.list_section)
         list_area.setContentsMargins(0, 0, 0, 0)
-        list_area.setSpacing(8)
+        list_area.setSpacing(scaled(8))
         list_area.addWidget(self.list_heading)
         list_area.addWidget(self.stack, 1)
 
         self.preview_section = QWidget()
         preview_area = QVBoxLayout(self.preview_section)
         preview_area.setContentsMargins(0, 0, 0, 0)
-        preview_area.setSpacing(8)
+        preview_area.setSpacing(scaled(8))
         self.preview_heading = QLabel("Preview")
         self.preview_heading.setObjectName("PanelHeading")
         preview_area.addWidget(self.preview_heading)
         preview_area.addWidget(self.preview, 1)
 
         self.settings_panel = self._build_settings_panel()
-        self.content_layout.addWidget(self.list_section, 0, 0)
-        self.content_layout.addWidget(self.preview_section, 0, 1)
-        self.content_layout.addWidget(self.settings_panel, 0, 2)
+        self.content_layout.addWidget(self.list_section, 4)
+        self.content_layout.addWidget(self.preview_section, 4)
+        self.content_layout.addWidget(self.settings_panel, 3)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("StatusText")
@@ -400,7 +393,7 @@ class ImageToPdfPage(QWidget):
         status_frame = QFrame()
         status_frame.setObjectName("StatusBar")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(10, 7, 10, 7)
+        status_layout.setContentsMargins(scaled(10), scaled(7), scaled(10), scaled(7))
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(title)
@@ -415,15 +408,15 @@ class ImageToPdfPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(240)
-        scroll.setMaximumWidth(380)
+        scroll.setMinimumWidth(scaled(310, minimum=210))
+        scroll.setMaximumWidth(scaled(390, minimum=265))
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(0)
+        panel.setMinimumWidth(scaled(300, minimum=205))
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(11)
+        layout.setContentsMargins(scaled(18), scaled(18), scaled(18), scaled(18))
+        layout.setSpacing(scaled(14))
 
         heading = QLabel("Settings")
         heading.setObjectName("PanelHeading")
@@ -449,6 +442,7 @@ class ImageToPdfPage(QWidget):
         self.corrections_panel = self._build_corrections_panel()
         self.corrections_panel.setVisible(False)
         layout.addWidget(self.corrections_panel)
+        layout.addStretch(1)
 
         self.export_button = QPushButton("Export PDF")
         self.export_button.setObjectName("PrimaryButton")
@@ -462,8 +456,8 @@ class ImageToPdfPage(QWidget):
         panel = QFrame()
         panel.setObjectName("CorrectionsPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, scaled(4), 0, 0)
+        layout.setSpacing(scaled(10))
 
         self.selection_label = QLabel("Select an image")
         self.selection_label.setObjectName("SubtleText")
@@ -482,14 +476,14 @@ class ImageToPdfPage(QWidget):
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(scaled(6))
 
         label = QLabel(title)
         label.setObjectName("FieldLabel")
         layout.addWidget(label)
 
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(scaled(6))
         group = QButtonGroup(section)
         group.setExclusive(True)
 
@@ -497,7 +491,7 @@ class ImageToPdfPage(QWidget):
             button = QPushButton(preset.value)
             button.setObjectName("PresetButton")
             button.setCheckable(True)
-            button.setMinimumHeight(34)
+            button.setMinimumHeight(scaled(34, minimum=24))
             button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             button.clicked.connect(lambda _checked=False, value=preset: callback(value))
             group.addButton(button)
@@ -512,66 +506,16 @@ class ImageToPdfPage(QWidget):
 
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
-        combo.setMinimumHeight(36)
-        combo.setMinimumWidth(180)
+        combo.setMinimumHeight(scaled(36, minimum=24))
+        combo.setMinimumWidth(scaled(260, minimum=177))
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(24)
         for item in enum_type:
             combo.addItem(item.value, item.value)
         combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(300)
+        combo.view().setMinimumWidth(scaled(300, minimum=204))
         return combo
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._apply_responsive_layout()
-
-    def _apply_responsive_layout(self, *, force: bool = False) -> None:
-        mode = responsive_mode_for_width(self._available_content_width())
-        if mode == self._layout_mode and not force:
-            return
-        self._layout_mode = mode
-        clear_grid_layout(self.content_layout)
-
-        if mode == ResponsiveMode.WIDE:
-            self.content_layout.addWidget(self.list_section, 0, 0)
-            self.content_layout.addWidget(self.preview_section, 0, 1)
-            self.content_layout.addWidget(self.settings_panel, 0, 2)
-            self.content_layout.setColumnStretch(0, 4)
-            self.content_layout.setColumnStretch(1, 4)
-            self.content_layout.setColumnStretch(2, 3)
-            self.stack.setMinimumHeight(300)
-            self.preview.setMinimumHeight(280)
-            self.settings_panel.setMaximumWidth(380)
-            return
-
-        if mode == ResponsiveMode.MEDIUM:
-            self.content_layout.addWidget(self.list_section, 0, 0)
-            self.content_layout.addWidget(self.settings_panel, 0, 1)
-            self.content_layout.addWidget(self.preview_section, 1, 0, 1, 2)
-            self.content_layout.setColumnStretch(0, 5)
-            self.content_layout.setColumnStretch(1, 3)
-            self.content_layout.setRowStretch(0, 5)
-            self.content_layout.setRowStretch(1, 3)
-            self.stack.setMinimumHeight(260)
-            self.preview.setMinimumHeight(190)
-            self.settings_panel.setMaximumWidth(360)
-            return
-
-        self.content_layout.addWidget(self.list_section, 0, 0)
-        self.content_layout.addWidget(self.preview_section, 1, 0)
-        self.content_layout.addWidget(self.settings_panel, 2, 0)
-        self.content_layout.setRowStretch(0, 5)
-        self.content_layout.setRowStretch(1, 3)
-        self.content_layout.setRowStretch(2, 2)
-        self.stack.setMinimumHeight(220)
-        self.preview.setMinimumHeight(160)
-        self.settings_panel.setMaximumWidth(16777215)
-
-    def _available_content_width(self) -> int:
-        margins = self.layout().contentsMargins()
-        return max(0, self.width() - margins.left() - margins.right())
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
@@ -587,11 +531,11 @@ class ImageToPdfPage(QWidget):
         frame.files_dropped.connect(self._add_images)
         layout = QVBoxLayout(frame)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(8)
+        layout.setSpacing(scaled(8))
 
         title = QLabel("Add images to create a PDF")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f3742; border: none;")
+        title.setStyleSheet(f"font-size: {scaled(18, minimum=12)}px; font-weight: 700; color: #2f3742; border: none;")
         hint = QLabel("Drag and drop JPG, JPEG, or PNG files here.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
@@ -623,7 +567,7 @@ class ImageToPdfPage(QWidget):
     def _append_item(self, entry: ImageEntry, order_number: int) -> None:
         item = QListWidgetItem()
         item.setData(PATH_ROLE, str(entry.path))
-        item.setSizeHint(QSize(300, 84))
+        item.setSizeHint(scaled_size(300, 84, minimum=56))
         self.image_list.addItem(item)
         row = ImageRowWidget(entry, self._thumbnail_for(entry.path), order_number)
         row.delete_requested.connect(self._remove_path)
@@ -633,7 +577,7 @@ class ImageToPdfPage(QWidget):
         try:
             stat = path.stat()
         except OSError:
-            pixmap = QPixmap(56, 56)
+            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
             pixmap.fill(Qt.white)
             return pixmap
         cache_key = (str(path), stat.st_mtime_ns)
@@ -645,10 +589,15 @@ class ImageToPdfPage(QWidget):
         reader.setAutoTransform(True)
         image = reader.read()
         if image.isNull():
-            pixmap = QPixmap(56, 56)
+            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
             pixmap.fill(Qt.white)
             return pixmap
-        pixmap = QPixmap.fromImage(image).scaled(54, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pixmap = QPixmap.fromImage(image).scaled(
+            scaled(54, minimum=37),
+            scaled(54, minimum=37),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
         self.thumbnail_cache[cache_key] = pixmap
         return pixmap
 

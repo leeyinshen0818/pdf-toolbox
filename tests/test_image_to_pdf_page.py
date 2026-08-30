@@ -234,9 +234,9 @@ def test_corrections_are_collapsed_by_default_and_use_preset_buttons(app: QAppli
 def test_settings_panel_has_room_for_controls(app: QApplication) -> None:
     page = ImageToPdfPage()
 
-    assert page.page_size_combo.minimumWidth() >= 180
+    assert page.page_size_combo.minimumWidth() >= 260
     assert page.page_size_combo.view().minimumWidth() >= 300
-    assert page.corrections_panel.parentWidget().minimumWidth() == 0
+    assert page.corrections_panel.parentWidget().minimumWidth() >= 300
 
 
 def test_redesigned_workspace_uses_independent_scrollable_image_list(app: QApplication) -> None:
@@ -246,7 +246,7 @@ def test_redesigned_workspace_uses_independent_scrollable_image_list(app: QAppli
     assert page.stack.maximumHeight() > 100000
     assert page.image_list.verticalScrollMode() == QAbstractItemView.ScrollPerPixel
     assert page.image_list.autoScrollMargin() >= 48
-    assert page.preview.minimumWidth() >= 220
+    assert page.preview.minimumWidth() >= 280
     assert page.export_button.isVisible() or not page.isVisible()
 
 

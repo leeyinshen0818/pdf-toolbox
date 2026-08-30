@@ -1,9 +1,17 @@
-APP_STYLE = """
+from __future__ import annotations
+
+
+def px(value: int | float, scale: float, *, minimum: int = 1) -> int:
+    return max(minimum, round(float(value) * scale))
+
+
+def build_app_style(scale: float = 1.0) -> str:
+    style = """
 QMainWindow, QWidget#Root {
     background: #f6f7f9;
     color: #1f2328;
     font-family: "Segoe UI", Arial, sans-serif;
-    font-size: 13px;
+    font-size: {px(13, scale, minimum=9)}px;
 }
 
 QFrame#Sidebar {
@@ -13,7 +21,7 @@ QFrame#Sidebar {
 
 QLabel#SidebarTitle {
     color: #1f2328;
-    font-size: 17px;
+    font-size: {px(17, scale, minimum=11)}px;
     font-weight: 700;
 }
 
@@ -21,7 +29,7 @@ QPushButton#NavButton {
     border: 1px solid transparent;
     border-radius: 6px;
     color: #2f3742;
-    padding: 9px 10px;
+    padding: {px(9, scale)}px {px(10, scale)}px;
     text-align: left;
     background: transparent;
 }
@@ -43,8 +51,8 @@ QPushButton {
     border-radius: 6px;
     background: #ffffff;
     color: #24292f;
-    min-height: 34px;
-    padding: 7px 11px;
+    min-height: {px(34, scale, minimum=24)}px;
+    padding: {px(7, scale, minimum=4)}px {px(11, scale, minimum=7)}px;
 }
 
 QPushButton:hover:enabled {
@@ -105,7 +113,7 @@ QListWidget#PageThumbnailList {
     border-radius: 8px;
     background: #ffffff;
     outline: 0;
-    padding: 8px;
+    padding: {px(8, scale, minimum=4)}px;
 }
 
 QListWidget#OrganizerPageGrid {
@@ -113,13 +121,13 @@ QListWidget#OrganizerPageGrid {
     border-radius: 8px;
     background: #ffffff;
     outline: 0;
-    padding: 10px;
+    padding: {px(10, scale, minimum=5)}px;
 }
 
 QListWidget#OrganizerPageGrid::item {
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 4px;
+    padding: {px(4, scale, minimum=2)}px;
 }
 
 QListWidget#OrganizerPageGrid::item:selected {
@@ -141,7 +149,7 @@ QFrame#OrganizerPageCard[selected="true"] {
 QListWidget#PageThumbnailList::item {
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 8px;
+    padding: {px(8, scale, minimum=4)}px;
     color: #374151;
 }
 
@@ -153,7 +161,7 @@ QListWidget#PageThumbnailList::item:selected {
 
 QListWidget#ImageList::item {
     border: none;
-    padding: 4px;
+    padding: {px(4, scale, minimum=2)}px;
 }
 
 QListWidget#ImageList::item:selected {
@@ -201,24 +209,24 @@ QScrollArea#SettingsScroll > QWidget > QWidget {
 
 QLabel#PanelHeading {
     color: #1f2328;
-    font-size: 14px;
+    font-size: {px(14, scale, minimum=10)}px;
     font-weight: 700;
 }
 
 QLabel#CardTitle {
     color: #1f2328;
-    font-size: 12px;
+    font-size: {px(12, scale, minimum=9)}px;
     font-weight: 700;
 }
 
 QLabel#CardMeta {
     color: #66707c;
-    font-size: 11px;
+    font-size: {px(11, scale, minimum=8)}px;
 }
 
 QLabel#FieldLabel {
     color: #4f5b67;
-    font-size: 12px;
+    font-size: {px(12, scale, minimum=9)}px;
     font-weight: 600;
 }
 
@@ -227,8 +235,8 @@ QComboBox {
     border: 1px solid #d0d7de;
     border-radius: 6px;
     color: #24292f;
-    min-height: 34px;
-    padding: 4px 10px;
+    min-height: {px(34, scale, minimum=24)}px;
+    padding: {px(4, scale, minimum=2)}px {px(10, scale, minimum=6)}px;
 }
 
 QComboBox QAbstractItemView,
@@ -243,9 +251,9 @@ QListView#ComboPopup {
 
 QComboBox QAbstractItemView::item,
 QListView#ComboPopup::item {
-    min-height: 28px;
+    min-height: {px(28, scale, minimum=20)}px;
     color: #24292f;
-    padding: 5px 8px;
+    padding: {px(5, scale, minimum=3)}px {px(8, scale, minimum=5)}px;
     background: #ffffff;
 }
 
@@ -265,8 +273,8 @@ QLineEdit {
     border: 1px solid #d0d7de;
     border-radius: 6px;
     color: #24292f;
-    min-height: 34px;
-    padding: 4px 10px;
+    min-height: {px(34, scale, minimum=24)}px;
+    padding: {px(4, scale, minimum=2)}px {px(10, scale, minimum=6)}px;
 }
 
 QLineEdit:read-only {
@@ -277,7 +285,7 @@ QProgressBar {
     background: #eef2f6;
     border: 1px solid #d8e0ea;
     border-radius: 6px;
-    min-height: 10px;
+    min-height: {px(10, scale, minimum=7)}px;
 }
 
 QProgressBar::chunk {
@@ -288,7 +296,7 @@ QProgressBar::chunk {
 QPushButton#IconButton {
     background: transparent;
     border: 1px solid transparent;
-    padding: 4px;
+    padding: {px(4, scale, minimum=2)}px;
 }
 
 QPushButton#IconButton:hover:enabled {
@@ -299,8 +307,8 @@ QPushButton#IconButton:hover:enabled {
 QPushButton#PresetButton {
     text-align: center;
     color: #24292f;
-    min-height: 34px;
-    padding: 8px 8px;
+    min-height: {px(34, scale, minimum=24)}px;
+    padding: {px(8, scale, minimum=4)}px {px(8, scale, minimum=4)}px;
     background: #ffffff;
 }
 
@@ -328,7 +336,7 @@ QLabel#ImageName {
 
 QLabel#ImageOrderNumber {
     color: #536170;
-    font-size: 12px;
+    font-size: {px(12, scale, minimum=9)}px;
     font-weight: 700;
 }
 
@@ -338,3 +346,29 @@ QLabel#StatusText {
     color: #66707c;
 }
 """
+    replacements = {
+        "{px(13, scale, minimum=9)}": px(13, scale, minimum=9),
+        "{px(17, scale, minimum=11)}": px(17, scale, minimum=11),
+        "{px(9, scale)}": px(9, scale),
+        "{px(10, scale)}": px(10, scale),
+        "{px(34, scale, minimum=24)}": px(34, scale, minimum=24),
+        "{px(7, scale, minimum=4)}": px(7, scale, minimum=4),
+        "{px(11, scale, minimum=7)}": px(11, scale, minimum=7),
+        "{px(8, scale, minimum=4)}": px(8, scale, minimum=4),
+        "{px(10, scale, minimum=5)}": px(10, scale, minimum=5),
+        "{px(4, scale, minimum=2)}": px(4, scale, minimum=2),
+        "{px(14, scale, minimum=10)}": px(14, scale, minimum=10),
+        "{px(12, scale, minimum=9)}": px(12, scale, minimum=9),
+        "{px(11, scale, minimum=8)}": px(11, scale, minimum=8),
+        "{px(10, scale, minimum=6)}": px(10, scale, minimum=6),
+        "{px(28, scale, minimum=20)}": px(28, scale, minimum=20),
+        "{px(5, scale, minimum=3)}": px(5, scale, minimum=3),
+        "{px(8, scale, minimum=5)}": px(8, scale, minimum=5),
+        "{px(10, scale, minimum=7)}": px(10, scale, minimum=7),
+    }
+    for token, value in replacements.items():
+        style = style.replace(token, str(value))
+    return style
+
+
+APP_STYLE = build_app_style()
