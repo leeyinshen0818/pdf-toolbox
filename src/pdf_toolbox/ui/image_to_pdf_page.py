@@ -4,11 +4,10 @@ import logging
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import QObject, QRectF, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QComboBox,
     QFileDialog,
@@ -23,7 +22,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -46,8 +45,10 @@ from pdf_toolbox.core.pdf_geometry import (
     calculate_page_layout,
 )
 from pdf_toolbox.core.output_location import open_output_location
-from pdf_toolbox.ui.scale import scaled, scaled_size
 from pdf_toolbox.ui.threads import thread_is_running
+from pdf_toolbox.ui import icons
+from pdf_toolbox.ui.metrics import ROW_THUMBNAIL, ROW_THUMBNAIL_IMAGE, file_row_height, file_row_size_hint, order_number_width
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, ICON_DELETE, ICON_INLINE, MIN_TARGET, PAGE_BG, SPACE_12, SPACE_16, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
 
 
 PATH_ROLE = Qt.UserRole + 1
@@ -71,11 +72,11 @@ class ImageListWidget(QListWidget):
         self.setDragDropMode(QListWidget.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QListWidget.ExtendedSelection)
-        self.setSpacing(scaled(5, minimum=3))
+        self.setSpacing(SPACE_4)
         self.setUniformItemSizes(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setAutoScroll(True)
-        self.setAutoScrollMargin(scaled(48, minimum=32))
+        self.setAutoScrollMargin(48)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -152,28 +153,26 @@ class ImageRowWidget(QWidget):
         self.setObjectName("ImageRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.path = str(entry.path)
-        self.setMinimumHeight(scaled(76, minimum=52))
+        self.setMinimumHeight(file_row_height())
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(scaled(8), scaled(6), scaled(8), scaled(6))
-        layout.setSpacing(scaled(9))
+        layout.setContentsMargins(SPACE_8, SPACE_4, SPACE_8, SPACE_4)
+        layout.setSpacing(SPACE_8)
 
         order_label = QLabel(str(order_number))
         order_label.setObjectName("ImageOrderNumber")
-        order_label.setFixedWidth(scaled(24, minimum=18))
+        order_label.setFixedWidth(order_number_width())
         order_label.setAlignment(Qt.AlignCenter)
 
         thumbnail_label = QLabel()
-        thumbnail_label.setFixedSize(scaled(58, minimum=40), scaled(58, minimum=40))
+        thumbnail_label.setObjectName("RowThumbnail")
+        thumbnail_label.setFixedSize(ROW_THUMBNAIL, ROW_THUMBNAIL)
         thumbnail_label.setAlignment(Qt.AlignCenter)
         thumbnail_label.setPixmap(thumbnail)
-        thumbnail_label.setStyleSheet(
-            "background: #f6f7f9; border: 1px solid #e1e6ec; border-radius: 5px;"
-        )
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(scaled(4))
+        text_layout.setSpacing(SPACE_4)
 
         filename = ElidedLabel(entry.filename)
         filename.setObjectName("ImageName")
@@ -188,9 +187,9 @@ class ImageRowWidget(QWidget):
         delete_button = QPushButton()
         delete_button.setObjectName("IconButton")
         delete_button.setToolTip("Remove image")
-        delete_button.setFixedSize(scaled(28, minimum=22), scaled(28, minimum=22))
-        delete_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
-        delete_button.setIconSize(scaled_size(16, 16, minimum=12))
+        delete_button.setFixedSize(MIN_TARGET, MIN_TARGET)
+        delete_button.setIcon(icons.icon("trash-2", TEXT_SECONDARY, ICON_DELETE))
+        delete_button.setIconSize(icons.icon_size(ICON_DELETE))
         delete_button.clicked.connect(lambda: self.delete_requested.emit(self.path))
 
         layout.addWidget(order_label)
@@ -217,7 +216,7 @@ class PreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumSize(scaled(280, minimum=190), scaled(360, minimum=245))
+        self.setMinimumSize(280, 360)
         self._pixmap: QPixmap | None = None
         self._image_size: tuple[int, int] | None = None
         self._settings = ExportSettings()
@@ -244,17 +243,17 @@ class PreviewWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#f8fafc"))
+        painter.fillRect(self.rect(), QColor(PAGE_BG))
 
         if self._pixmap is None or self._image_size is None:
-            painter.setPen(QColor("#7a8491"))
+            painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(self.rect(), Qt.AlignCenter, self._empty_text)
             return
 
         layout = self.current_layout()
         if layout is None:
             return
-        inset = scaled(18, minimum=10)
+        inset = SPACE_16
         available = self.rect().adjusted(inset, inset, -inset, -inset)
         scale = min(available.width() / layout.page_size.width, available.height() / layout.page_size.height)
         page_width = layout.page_size.width * scale
@@ -266,8 +265,8 @@ class PreviewWidget(QWidget):
             page_height,
         )
 
-        painter.setPen(QPen(QColor("#cfd7e2"), 1))
-        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor(BORDER), 1))
+        painter.setBrush(QColor(CARD_BG))
         painter.drawRoundedRect(page_rect, 4, 4)
 
         image_rect = QRectF(
@@ -337,16 +336,16 @@ class ImageToPdfPage(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(scaled(32), scaled(26), scaled(34), scaled(22))
-        layout.setSpacing(scaled(13))
+        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
+        layout.setSpacing(SPACE_12)
 
-        title = QLabel("Image -> PDF")
-        title.setStyleSheet(f"font-size: {scaled(22, minimum=15)}px; font-weight: 700; color: #1f2328;")
+        title = QLabel("Image → PDF")
+        title.setObjectName("PageTitle")
         subtitle = QLabel("Import images, arrange their order, and export them as one PDF.")
         subtitle.setObjectName("SubtleText")
 
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(scaled(8))
+        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add Images")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -357,7 +356,7 @@ class ImageToPdfPage(QWidget):
         toolbar.addStretch(1)
 
         self.content_layout = QHBoxLayout()
-        self.content_layout.setSpacing(scaled(18))
+        self.content_layout.setSpacing(SPACE_16)
 
         self.list_heading = QLabel("Imported Images")
         self.list_heading.setObjectName("PanelHeading")
@@ -369,21 +368,21 @@ class ImageToPdfPage(QWidget):
         self.image_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.image_list)
-        self.stack.setMinimumSize(scaled(330, minimum=225), scaled(360, minimum=245))
+        self.stack.setMinimumSize(330, 360)
 
         self.preview = PreviewWidget()
 
         self.list_section = QWidget()
         list_area = QVBoxLayout(self.list_section)
         list_area.setContentsMargins(0, 0, 0, 0)
-        list_area.setSpacing(scaled(8))
+        list_area.setSpacing(SPACE_8)
         list_area.addWidget(self.list_heading)
         list_area.addWidget(self.stack, 1)
 
         self.preview_section = QWidget()
         preview_area = QVBoxLayout(self.preview_section)
         preview_area.setContentsMargins(0, 0, 0, 0)
-        preview_area.setSpacing(scaled(8))
+        preview_area.setSpacing(SPACE_8)
         self.preview_heading = QLabel("Preview")
         self.preview_heading.setObjectName("PanelHeading")
         preview_area.addWidget(self.preview_heading)
@@ -400,7 +399,7 @@ class ImageToPdfPage(QWidget):
         status_frame = QFrame()
         status_frame.setObjectName("StatusBar")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(scaled(10), scaled(7), scaled(10), scaled(7))
+        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(title)
@@ -415,15 +414,15 @@ class ImageToPdfPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(scaled(310, minimum=210))
-        scroll.setMaximumWidth(scaled(390, minimum=265))
+        scroll.setMinimumWidth(310)
+        scroll.setMaximumWidth(390)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(scaled(300, minimum=205))
+        panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(scaled(18), scaled(18), scaled(18), scaled(18))
-        layout.setSpacing(scaled(14))
+        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
+        layout.setSpacing(SPACE_12)
 
         heading = QLabel("Settings")
         heading.setObjectName("PanelHeading")
@@ -441,8 +440,12 @@ class ImageToPdfPage(QWidget):
         self.margin_combo.currentIndexChanged.connect(self._on_export_settings_changed)
         layout.addLayout(self._labeled_control("Margin", self.margin_combo))
 
-        self.corrections_toggle = QPushButton("Corrections v")
+        self.corrections_toggle = QPushButton("Corrections")
         self.corrections_toggle.setCheckable(True)
+        # Right-to-left puts the chevron after the label; the label itself is left unchanged.
+        self.corrections_toggle.setLayoutDirection(Qt.RightToLeft)
+        self.corrections_toggle.setIconSize(icons.icon_size(ICON_INLINE))
+        self.corrections_toggle.setIcon(icons.icon("chevron-down", TEXT_SECONDARY, ICON_INLINE))
         self.corrections_toggle.clicked.connect(self._toggle_corrections)
         layout.addWidget(self.corrections_toggle)
 
@@ -463,8 +466,8 @@ class ImageToPdfPage(QWidget):
         panel = QFrame()
         panel.setObjectName("CorrectionsPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, scaled(4), 0, 0)
-        layout.setSpacing(scaled(10))
+        layout.setContentsMargins(0, SPACE_4, 0, 0)
+        layout.setSpacing(SPACE_8)
 
         self.selection_label = QLabel("Select an image")
         self.selection_label.setObjectName("SubtleText")
@@ -483,14 +486,14 @@ class ImageToPdfPage(QWidget):
         section = QWidget()
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(scaled(6))
+        layout.setSpacing(SPACE_4)
 
         label = QLabel(title)
         label.setObjectName("FieldLabel")
         layout.addWidget(label)
 
         grid = QGridLayout()
-        grid.setSpacing(scaled(6))
+        grid.setSpacing(SPACE_4)
         group = QButtonGroup(section)
         group.setExclusive(True)
 
@@ -498,7 +501,7 @@ class ImageToPdfPage(QWidget):
             button = QPushButton(preset.value)
             button.setObjectName("PresetButton")
             button.setCheckable(True)
-            button.setMinimumHeight(scaled(34, minimum=24))
+            button.setMinimumHeight(CONTROL_HEIGHT)
             button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             button.clicked.connect(lambda _checked=False, value=preset: callback(value))
             group.addButton(button)
@@ -513,20 +516,22 @@ class ImageToPdfPage(QWidget):
 
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
-        combo.setMinimumHeight(scaled(36, minimum=24))
-        combo.setMinimumWidth(scaled(260, minimum=177))
+        combo.setMinimumHeight(CONTROL_HEIGHT)
+        combo.setMinimumWidth(260)
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(24)
         for item in enum_type:
             combo.addItem(item.value, item.value)
+        # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
+        combo.setItemDelegate(QStyledItemDelegate(combo))
         combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(scaled(300, minimum=204))
+        combo.view().setMinimumWidth(300)
         return combo
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(4)
+        layout.setSpacing(SPACE_4)
         text = QLabel(label)
         text.setObjectName("FieldLabel")
         layout.addWidget(text)
@@ -538,11 +543,11 @@ class ImageToPdfPage(QWidget):
         frame.files_dropped.connect(self._add_images)
         layout = QVBoxLayout(frame)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(scaled(8))
+        layout.setSpacing(SPACE_8)
 
         title = QLabel("Add images to create a PDF")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(f"font-size: {scaled(18, minimum=12)}px; font-weight: 700; color: #2f3742; border: none;")
+        title.setObjectName("DropTitle")
         hint = QLabel("Drag and drop JPG, JPEG, or PNG files here.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
@@ -593,7 +598,7 @@ class ImageToPdfPage(QWidget):
     def _append_item(self, entry: ImageEntry, order_number: int) -> None:
         item = QListWidgetItem()
         item.setData(PATH_ROLE, str(entry.path))
-        item.setSizeHint(scaled_size(300, 84, minimum=56))
+        item.setSizeHint(file_row_size_hint())
         self.image_list.addItem(item)
         row = ImageRowWidget(entry, self._thumbnail_for(entry.path), order_number)
         row.delete_requested.connect(self._remove_path)
@@ -602,8 +607,8 @@ class ImageToPdfPage(QWidget):
     def _thumbnail_for(self, path: Path) -> QPixmap:
         pixmap = self._load_thumbnail(path)
         if pixmap is None:
-            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
-            pixmap.fill(Qt.white)
+            pixmap = QPixmap(ROW_THUMBNAIL_IMAGE, ROW_THUMBNAIL_IMAGE)
+            pixmap.fill(QColor(CARD_BG))
         return pixmap
 
     def _load_thumbnail(self, path: Path) -> QPixmap | None:
@@ -616,7 +621,7 @@ class ImageToPdfPage(QWidget):
         if cached is not None:
             return cached
 
-        target = scaled(54, minimum=37)
+        target = ROW_THUMBNAIL_IMAGE
         reader = QImageReader(str(path))
         reader.setAutoTransform(True)
         raw_size = reader.size()
@@ -819,7 +824,8 @@ class ImageToPdfPage(QWidget):
 
     def _toggle_corrections(self, checked: bool) -> None:
         self.corrections_panel.setVisible(checked)
-        self.corrections_toggle.setText("Corrections ^" if checked else "Corrections v")
+        chevron = "chevron-up" if checked else "chevron-down"
+        self.corrections_toggle.setIcon(icons.icon(chevron, TEXT_SECONDARY, ICON_INLINE))
 
     def _set_sharpness(self, preset: SharpnessPreset) -> None:
         self._update_selected_corrections(sharpness=preset)

@@ -37,11 +37,22 @@ def import_app_metadata(root: Path):
     return APP_ICON_RELATIVE_PATH, APP_NAME, APP_VERSION
 
 
+ICON_ASSETS_RELATIVE_PATH = ("assets", "icons")
+
+
 def collect_runtime_assets(root: Path, icon_relative_path: tuple[str, ...]):
     icon_path = root.joinpath(*icon_relative_path)
     datas = [(str(icon_path), str(Path(*icon_relative_path).parent))]
     binaries = []
-    hiddenimports = ["pymupdf"]
+    # QtSvg renders the Lucide icons; PyInstaller's PySide6 hook then also ships the
+    # imageformats/qsvg plugin that the stylesheet's SVG combo arrows need.
+    hiddenimports = ["pymupdf", "PySide6.QtSvg"]
+
+    # Lucide SVG icons plus their ISC/MIT licence file, served from <bundle>/assets/icons.
+    icon_assets = root.joinpath(*ICON_ASSETS_RELATIVE_PATH)
+    for asset in sorted(icon_assets.iterdir()):
+        if asset.is_file():
+            datas.append((str(asset), str(Path(*ICON_ASSETS_RELATIVE_PATH))))
 
     for package_name in ("pillow_heif",):
         datas += collect_data_files(package_name)

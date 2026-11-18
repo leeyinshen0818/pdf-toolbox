@@ -4,10 +4,9 @@ import logging
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import QObject, QSettings, QSize, QStandardPaths, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSettings, QStandardPaths, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -39,8 +38,10 @@ from pdf_toolbox.core.heic_to_jpg import (
 from pdf_toolbox.core.lru_cache import LruCache
 from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.core.pdf_to_image import JpgQuality
-from pdf_toolbox.ui.scale import scaled, scaled_size
 from pdf_toolbox.ui.threads import thread_is_running
+from pdf_toolbox.ui import icons
+from pdf_toolbox.ui.metrics import ROW_THUMBNAIL, ROW_THUMBNAIL_IMAGE, file_row_size_hint
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, ICON_DELETE, MIN_TARGET, PAGE_BG, SPACE_12, SPACE_16, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
 
 
 HEIC_PATH_ROLE = Qt.UserRole + 40
@@ -64,11 +65,11 @@ class HeicDropArea(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(scaled(8))
+        layout.setSpacing(SPACE_8)
 
         title = QLabel("Add HEIC files to convert into JPG")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(f"font-size: {scaled(18, minimum=12)}px; font-weight: 700; color: #2f3742; border: none;")
+        title.setObjectName("DropTitle")
         hint = QLabel("Drag and drop HEIC or HEIF files here.")
         hint.setAlignment(Qt.AlignCenter)
         hint.setObjectName("SubtleText")
@@ -115,7 +116,7 @@ class HeicListWidget(QListWidget):
         self.setObjectName("ImageList")
         self.setAcceptDrops(True)
         self.setSelectionMode(QListWidget.SingleSelection)
-        self.setSpacing(scaled(5, minimum=3))
+        self.setSpacing(SPACE_4)
         self.setUniformItemSizes(True)
 
     def dragEnterEvent(self, event) -> None:
@@ -154,18 +155,18 @@ class HeicRowWidget(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(scaled(8), scaled(6), scaled(8), scaled(6))
-        layout.setSpacing(scaled(9))
+        layout.setContentsMargins(SPACE_8, SPACE_4, SPACE_8, SPACE_4)
+        layout.setSpacing(SPACE_8)
 
         thumbnail_label = QLabel()
-        thumbnail_label.setFixedSize(scaled(58, minimum=40), scaled(58, minimum=40))
+        thumbnail_label.setObjectName("RowThumbnail")
+        thumbnail_label.setFixedSize(ROW_THUMBNAIL, ROW_THUMBNAIL)
         thumbnail_label.setAlignment(Qt.AlignCenter)
         thumbnail_label.setPixmap(thumbnail)
-        thumbnail_label.setStyleSheet("background: #f6f7f9; border: 1px solid #e1e6ec; border-radius: 5px;")
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(scaled(4))
+        text_layout.setSpacing(SPACE_4)
         filename = QLabel(entry.filename)
         filename.setObjectName("ImageName")
         filename.setToolTip(entry.filename)
@@ -177,9 +178,9 @@ class HeicRowWidget(QWidget):
         delete_button = QPushButton()
         delete_button.setObjectName("IconButton")
         delete_button.setToolTip("Remove file")
-        delete_button.setFixedSize(scaled(28, minimum=22), scaled(28, minimum=22))
-        delete_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
-        delete_button.setIconSize(scaled_size(16, 16, minimum=12))
+        delete_button.setFixedSize(MIN_TARGET, MIN_TARGET)
+        delete_button.setIcon(icons.icon("trash-2", TEXT_SECONDARY, ICON_DELETE))
+        delete_button.setIconSize(icons.icon_size(ICON_DELETE))
         delete_button.clicked.connect(lambda: self.delete_requested.emit(str(entry.path)))
 
         layout.addWidget(thumbnail_label)
@@ -191,7 +192,7 @@ class HeicPreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumSize(scaled(280, minimum=190), scaled(360, minimum=245))
+        self.setMinimumSize(280, 360)
         self._pixmap: QPixmap | None = None
         self._empty_text = "Add HEIC files to begin"
 
@@ -203,19 +204,19 @@ class HeicPreviewWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#f8fafc"))
+        painter.fillRect(self.rect(), QColor(PAGE_BG))
         if self._pixmap is None:
-            painter.setPen(QColor("#7a8491"))
+            painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(self.rect(), Qt.AlignCenter, self._empty_text)
             return
 
-        inset = scaled(18, minimum=10)
+        inset = SPACE_16
         available = self.rect().adjusted(inset, inset, -inset, -inset)
         fitted = self._pixmap.scaled(available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         x = available.x() + (available.width() - fitted.width()) // 2
         y = available.y() + (available.height() - fitted.height()) // 2
-        painter.setPen(QPen(QColor("#cfd7e2"), 1))
-        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor(BORDER), 1))
+        painter.setBrush(QColor(CARD_BG))
         painter.drawRoundedRect(x - 6, y - 6, fitted.width() + 12, fitted.height() + 12, 4, 4)
         painter.drawPixmap(x, y, fitted)
 
@@ -278,16 +279,16 @@ class HeicToJpgPage(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(scaled(32), scaled(26), scaled(34), scaled(22))
-        layout.setSpacing(scaled(13))
+        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
+        layout.setSpacing(SPACE_12)
 
-        title = QLabel("HEIC -> JPG")
-        title.setStyleSheet(f"font-size: {scaled(22, minimum=15)}px; font-weight: 700; color: #1f2328;")
+        title = QLabel("HEIC → JPG")
+        title.setObjectName("PageTitle")
         subtitle = QLabel("Convert HEIC and HEIF photos into high-quality JPG images.")
         subtitle.setObjectName("SubtleText")
 
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(scaled(8))
+        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add HEICs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -298,12 +299,12 @@ class HeicToJpgPage(QWidget):
         toolbar.addStretch(1)
 
         self.content_layout = QHBoxLayout()
-        self.content_layout.setSpacing(scaled(18))
+        self.content_layout.setSpacing(SPACE_16)
 
         self.list_section = QWidget()
         list_layout = QVBoxLayout(self.list_section)
         list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.setSpacing(scaled(8))
+        list_layout.setSpacing(SPACE_8)
         self.info_label = QLabel("No HEIC files loaded")
         self.info_label.setObjectName("SubtleText")
         self.stack = QStackedWidget()
@@ -314,14 +315,14 @@ class HeicToJpgPage(QWidget):
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.file_list)
-        self.stack.setMinimumSize(scaled(330, minimum=225), scaled(360, minimum=245))
+        self.stack.setMinimumSize(330, 360)
         list_layout.addWidget(self.info_label)
         list_layout.addWidget(self.stack, 1)
 
         self.preview_section = QWidget()
         preview_layout = QVBoxLayout(self.preview_section)
         preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(scaled(8))
+        preview_layout.setSpacing(SPACE_8)
         preview_heading = QLabel("Preview")
         preview_heading.setObjectName("PanelHeading")
         self.preview = HeicPreviewWidget()
@@ -339,7 +340,7 @@ class HeicToJpgPage(QWidget):
         status_frame = QFrame()
         status_frame.setObjectName("StatusBar")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(scaled(10), scaled(7), scaled(10), scaled(7))
+        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(title)
@@ -354,15 +355,15 @@ class HeicToJpgPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(scaled(310, minimum=210))
-        scroll.setMaximumWidth(scaled(390, minimum=265))
+        scroll.setMinimumWidth(310)
+        scroll.setMaximumWidth(390)
 
         panel = QFrame()
         panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(scaled(300, minimum=205))
+        panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(scaled(18), scaled(18), scaled(18), scaled(18))
-        layout.setSpacing(scaled(14))
+        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
+        layout.setSpacing(SPACE_12)
 
         heading = QLabel("Conversion Settings")
         heading.setObjectName("PanelHeading")
@@ -377,13 +378,13 @@ class HeicToJpgPage(QWidget):
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
         self.output_folder_edit.setPlaceholderText("Choose a folder")
-        self.output_folder_edit.setMinimumWidth(scaled(120, minimum=80))
+        self.output_folder_edit.setMinimumWidth(120)
         self.output_folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.browse_output_folder_button = QPushButton("Browse")
         self.browse_output_folder_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.browse_output_folder_button.clicked.connect(self._choose_output_folder)
         output_row = QHBoxLayout()
-        output_row.setSpacing(scaled(6))
+        output_row.setSpacing(SPACE_4)
         output_row.addWidget(self.output_folder_edit, 1)
         output_row.addWidget(self.browse_output_folder_button)
         self.set_default_folder_button = QPushButton("Set as Default Folder")
@@ -411,18 +412,20 @@ class HeicToJpgPage(QWidget):
 
     def _combo(self, enum_type) -> QComboBox:
         combo = QComboBox()
-        combo.setMinimumHeight(scaled(36, minimum=24))
-        combo.setMinimumWidth(scaled(260, minimum=177))
+        combo.setMinimumHeight(CONTROL_HEIGHT)
+        combo.setMinimumWidth(260)
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for item in enum_type:
             combo.addItem(item.value, item.value)
+        # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
+        combo.setItemDelegate(QStyledItemDelegate(combo))
         combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(scaled(300, minimum=204))
+        combo.view().setMinimumWidth(300)
         return combo
 
     def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(scaled(4))
+        layout.setSpacing(SPACE_4)
         text = QLabel(label)
         text.setObjectName("FieldLabel")
         layout.addWidget(text)
@@ -458,7 +461,7 @@ class HeicToJpgPage(QWidget):
         for entry in self.collection.entries:
             item = QListWidgetItem()
             item.setData(HEIC_PATH_ROLE, str(entry.path))
-            item.setSizeHint(scaled_size(300, 84, minimum=56))
+            item.setSizeHint(file_row_size_hint())
             self.file_list.addItem(item)
             row = HeicRowWidget(entry, self._thumbnail_for(entry))
             row.delete_requested.connect(self._remove_path)
@@ -496,8 +499,8 @@ class HeicToJpgPage(QWidget):
             return False
         self.preview_cache[cache_key] = preview
         self.thumbnail_cache[cache_key] = preview.scaled(
-            scaled(54, minimum=37),
-            scaled(54, minimum=37),
+            ROW_THUMBNAIL_IMAGE,
+            ROW_THUMBNAIL_IMAGE,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
@@ -510,8 +513,8 @@ class HeicToJpgPage(QWidget):
             cached = self.thumbnail_cache.get(cache_key)
         if cached is not None:
             return cached
-        pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
-        pixmap.fill(Qt.white)
+        pixmap = QPixmap(ROW_THUMBNAIL_IMAGE, ROW_THUMBNAIL_IMAGE)
+        pixmap.fill(QColor(CARD_BG))
         return pixmap
 
     def _show_import_result(self, result: AddHeicResult) -> None:
@@ -771,8 +774,8 @@ def pixmap_from_png_bytes(data: bytes) -> QPixmap:
     pixmap = QPixmap()
     if pixmap.loadFromData(data):
         return pixmap
-    fallback = QPixmap(56, 56)
-    fallback.fill(Qt.white)
+    fallback = QPixmap(ROW_THUMBNAIL_IMAGE, ROW_THUMBNAIL_IMAGE)
+    fallback.fill(QColor(CARD_BG))
     return fallback
 
 

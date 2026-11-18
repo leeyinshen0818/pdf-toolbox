@@ -26,6 +26,14 @@ def app_icon_path() -> Path:
     return resource_path(*APP_ICON_RELATIVE_PATH)
 
 
+ICON_ASSETS_RELATIVE_PATH = ("assets", "icons")
+
+
+def icon_asset_path(name: str) -> Path:
+    """Path of a bundled Lucide SVG, e.g. icon_asset_path("trash-2")."""
+    return resource_path(*ICON_ASSETS_RELATIVE_PATH, f"{name}.svg")
+
+
 def user_data_dir() -> Path:
     if sys.platform.startswith("win"):
         base = os.environ.get("LOCALAPPDATA")

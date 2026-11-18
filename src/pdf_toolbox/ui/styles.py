@@ -1,374 +1,505 @@
+"""Application stylesheet, generated entirely from ui/tokens.py."""
 from __future__ import annotations
 
+from pdf_toolbox.ui import tokens as T
+from pdf_toolbox.ui.icons import stylesheet_svg_path
 
-def px(value: int | float, scale: float, *, minimum: int = 1) -> int:
-    return max(minimum, round(float(value) * scale))
+
+def _font(style: T.TextStyle) -> str:
+    return f"font-size: {style.size}px; font-weight: {style.weight};"
 
 
-def build_app_style(scale: float = 1.0) -> str:
-    style = """
-QMainWindow, QWidget#Root {
-    background: #f6f7f9;
-    color: #1f2328;
-    font-family: "Segoe UI", Arial, sans-serif;
-    font-size: {px(13, scale, minimum=9)}px;
-}
+def _px(value: float) -> str:
+    return f"{value:g}px"
 
-QFrame#Sidebar {
-    background: #ffffff;
-    border-right: 1px solid #e2e6ec;
-}
 
-QLabel#SidebarTitle {
-    color: #1f2328;
-    font-size: {px(17, scale, minimum=11)}px;
-    font-weight: 700;
-}
+def build_app_style() -> str:
+    border = 1
+    ring = T.FOCUS_RING_WIDTH
+    selected_border = _px(T.SELECTED_BORDER_WIDTH)
+    # Buttons/inputs keep a constant outer height: min-height covers the content box, so the
+    # border width is subtracted, and the focus state trades 1px of padding for the wider ring.
+    control_min = T.CONTROL_HEIGHT - 2 * border
+    control_min_focus = T.CONTROL_HEIGHT - 2 * ring
+    pad_x = T.SPACE_16
+    pad_x_focus = pad_x - (ring - border)
+    input_pad_x = T.SPACE_12
+    input_pad_x_focus = input_pad_x - (ring - border)
+    chevron_down = stylesheet_svg_path("chevron-down", T.TEXT_SECONDARY)
+    chevron_up = stylesheet_svg_path("chevron-up", T.TEXT_SECONDARY)
+    chevron_disabled = stylesheet_svg_path("chevron-down", T.DISABLED_TEXT)
 
-QPushButton#NavButton {
-    border: 1px solid transparent;
-    border-radius: 6px;
-    color: #2f3742;
-    padding: {px(9, scale)}px {px(10, scale)}px;
+    return f"""
+/* ---------- base ---------- */
+QMainWindow, QWidget#Root {{
+    background: {T.PAGE_BG};
+    color: {T.TEXT};
+    font-family: {T.FONT_FAMILY_CSS};
+    {_font(T.TYPE_BODY)}
+}}
+
+QLabel {{
+    color: {T.TEXT};
+}}
+
+QLabel#PageTitle {{
+    color: {T.TEXT};
+    {_font(T.TYPE_PAGE_TITLE)}
+}}
+
+QLabel#PanelHeading,
+QLabel#DropTitle {{
+    color: {T.TEXT};
+    {_font(T.TYPE_SECTION_TITLE)}
+    background: transparent;
+    border: none;
+}}
+
+QLabel#FieldLabel {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_FIELD_LABEL)}
+}}
+
+QLabel#SubtleText,
+QLabel#StatusText {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_BODY)}
+    background: transparent;
+    border: none;
+}}
+
+QLabel#CardTitle {{
+    color: {T.TEXT};
+    {_font(T.TYPE_SECTION_TITLE)}
+}}
+
+QLabel#CardMeta,
+QLabel#ImageDimensions {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_CAPTION)}
+}}
+
+QLabel#ImageName {{
+    color: {T.TEXT};
+    {_font(T.TYPE_BODY_STRONG)}
+}}
+
+QLabel#ImageOrderNumber {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_FIELD_LABEL)}
+}}
+
+QLabel#RowThumbnail {{
+    background: {T.PAGE_BG};
+    border: {border}px solid {T.HAIRLINE};
+    border-radius: {T.RADIUS_CONTROL}px;
+}}
+
+/* ---------- sidebar ---------- */
+QFrame#Sidebar {{
+    background: {T.CARD_BG};
+    border-right: {border}px solid {T.HAIRLINE};
+}}
+
+QLabel#SidebarTitle {{
+    color: {T.TEXT};
+    {_font(T.TYPE_SECTION_TITLE)}
+}}
+
+QPushButton#NavButton {{
+    background: transparent;
+    color: {T.TEXT};
+    {_font(T.TYPE_BUTTON)}
     text-align: left;
-    background: transparent;
-}
+    border: {border}px solid transparent;
+    border-radius: {T.RADIUS_CONTROL}px;
+    min-height: {T.SIDEBAR_ITEM_HEIGHT - 2 * border}px;
+    padding: 0px {T.SPACE_12}px;
+}}
 
-QPushButton#NavButton:checked {
-    background: #eaf1fb;
-    border-color: #d6e3f4;
-    color: #163b66;
+QPushButton#NavButton:hover {{
+    background: {T.PAGE_BG};
+}}
+
+QPushButton#NavButton:checked {{
+    background: {T.PRIMARY_TINT};
+    color: {T.PRIMARY};
     font-weight: 600;
-}
+}}
 
-QPushButton#NavButton:disabled {
-    color: #9aa3af;
-    background: transparent;
-}
+QPushButton#NavButton:focus {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {T.SIDEBAR_ITEM_HEIGHT - 2 * ring}px;
+    padding: 0px {T.SPACE_12 - (ring - border)}px;
+}}
 
-QPushButton {
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    background: #ffffff;
-    color: #24292f;
-    min-height: {px(34, scale, minimum=24)}px;
-    padding: {px(7, scale, minimum=4)}px {px(11, scale, minimum=7)}px;
-}
+/* ---------- buttons ---------- */
+QPushButton {{
+    background: {T.CARD_BG};
+    color: {T.TEXT};
+    {_font(T.TYPE_BUTTON)}
+    border: {border}px solid {T.BORDER};
+    border-radius: {T.RADIUS_CONTROL}px;
+    min-height: {control_min}px;
+    padding: 0px {pad_x}px;
+}}
 
-QPushButton:hover:enabled {
-    background: #f3f6fa;
-    border-color: #b9c4d0;
-}
+QPushButton:hover {{
+    background: {T.PAGE_BG};
+    border-color: {T.TEXT_SECONDARY};
+}}
 
-QPushButton:pressed:enabled {
-    background: #e8edf3;
-}
+QPushButton:pressed {{
+    background: {T.HAIRLINE};
+}}
 
-QPushButton:disabled {
-    color: #9aa3af;
-    background: #f1f3f6;
-    border-color: #dbe1e8;
-}
+QPushButton:focus {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {control_min_focus}px;
+    padding: 0px {pad_x_focus}px;
+}}
 
-QPushButton#PrimaryButton {
-    background: #1f4f82;
-    border-color: #1f4f82;
-    color: #ffffff;
+QPushButton:disabled {{
+    background: {T.DISABLED_BG};
+    color: {T.DISABLED_TEXT};
+    border-color: {T.DISABLED_BG};
+}}
+
+QPushButton#PrimaryButton {{
+    background: {T.PRIMARY};
+    color: {T.ON_PRIMARY};
+    border-color: {T.PRIMARY};
+}}
+
+QPushButton#PrimaryButton:hover {{
+    background: {T.PRIMARY_HOVER};
+    border-color: {T.PRIMARY_HOVER};
+}}
+
+QPushButton#PrimaryButton:pressed {{
+    background: {T.PRIMARY_PRESSED};
+    border-color: {T.PRIMARY_PRESSED};
+}}
+
+QPushButton#PrimaryButton:focus {{
+    border-color: {T.PRIMARY_PRESSED};
+}}
+
+QPushButton#PrimaryButton:disabled {{
+    background: {T.DISABLED_BG};
+    color: {T.DISABLED_TEXT};
+    border-color: {T.DISABLED_BG};
+}}
+
+QPushButton#SecondaryActionButton {{
+    background: {T.CARD_BG};
+    color: {T.TEXT};
+}}
+
+QPushButton#PresetButton:checked {{
+    background: {T.PRIMARY_TINT};
+    color: {T.PRIMARY};
+    border: {border}px solid {T.PRIMARY};
     font-weight: 600;
-}
+}}
 
-QPushButton#PrimaryButton:hover:enabled {
-    background: #183f69;
-}
+QPushButton#PresetButton:checked:focus {{
+    border: {ring}px solid {T.PRIMARY};
+}}
 
-QPushButton#SecondaryActionButton {
-    background: #ffffff;
-    border-color: #cfd7e2;
-    color: #1f2328;
-    font-weight: 500;
-}
+QPushButton#IconButton {{
+    background: transparent;
+    border: {border}px solid transparent;
+    min-height: {T.MIN_TARGET - 2 * border}px;
+    min-width: {T.MIN_TARGET - 2 * border}px;
+    padding: 0px;
+}}
 
-QPushButton#SecondaryActionButton:hover:enabled {
-    background: #f3f6fa;
-    border-color: #aebaca;
-}
+QPushButton#IconButton:hover {{
+    background: {T.DANGER_BG};
+    border-color: {T.DANGER_BG};
+}}
 
-QListWidget#ImageList {
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-    background: #ffffff;
-    outline: 0;
-}
+QPushButton#IconButton:focus {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {T.MIN_TARGET - 2 * ring}px;
+    min-width: {T.MIN_TARGET - 2 * ring}px;
+}}
+
+/* ---------- inputs ---------- */
+QLineEdit {{
+    background: {T.CARD_BG};
+    color: {T.TEXT};
+    {_font(T.TYPE_BODY)}
+    border: {border}px solid {T.BORDER};
+    border-radius: {T.RADIUS_CONTROL}px;
+    min-height: {control_min}px;
+    padding: 0px {input_pad_x}px;
+    selection-background-color: {T.PRIMARY_TINT};
+    selection-color: {T.TEXT};
+}}
+
+QLineEdit:focus {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {control_min_focus}px;
+    padding: 0px {input_pad_x_focus}px;
+}}
+
+QLineEdit:read-only {{
+    background: {T.PAGE_BG};
+}}
+
+QLineEdit:disabled {{
+    background: {T.DISABLED_BG};
+    color: {T.DISABLED_TEXT};
+    border-color: {T.DISABLED_BG};
+}}
+
+/* ---------- combo boxes ---------- */
+QComboBox {{
+    background: {T.CARD_BG};
+    color: {T.TEXT};
+    {_font(T.TYPE_BODY)}
+    border: {border}px solid {T.BORDER};
+    border-radius: {T.RADIUS_CONTROL}px;
+    min-height: {control_min}px;
+    padding: 0px {T.SPACE_32 + T.SPACE_4}px 0px {input_pad_x}px;
+}}
+
+QComboBox:hover {{
+    border-color: {T.TEXT_SECONDARY};
+}}
+
+QComboBox:focus,
+QComboBox:on {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {control_min_focus}px;
+    padding: 0px {T.SPACE_32 + T.SPACE_4 - (ring - border)}px 0px {input_pad_x_focus}px;
+}}
+
+QComboBox:disabled {{
+    background: {T.DISABLED_BG};
+    color: {T.DISABLED_TEXT};
+    border-color: {T.DISABLED_BG};
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: {T.SPACE_32}px;
+    border: none;
+    background: transparent;
+}}
+
+QComboBox::down-arrow {{
+    image: url("{chevron_down}");
+    width: {T.ICON_INLINE}px;
+    height: {T.ICON_INLINE}px;
+}}
+
+QComboBox::down-arrow:on {{
+    image: url("{chevron_up}");
+}}
+
+QComboBox::down-arrow:disabled {{
+    image: url("{chevron_disabled}");
+}}
+
+QComboBox QAbstractItemView,
+QListView#ComboPopup {{
+    background: {T.CARD_BG};
+    color: {T.TEXT};
+    border: {border}px solid {T.BORDER};
+    border-radius: {T.RADIUS_CONTROL}px;
+    padding: {T.SPACE_4}px;
+    outline: 0px;
+    selection-background-color: {T.PRIMARY_TINT};
+    selection-color: {T.TEXT};
+}}
+
+QComboBox QAbstractItemView::item,
+QListView#ComboPopup::item {{
+    min-height: {T.COMBO_ITEM_HEIGHT}px;
+    padding: 0px {T.SPACE_12}px;
+    border-radius: {T.RADIUS_CONTROL - 2}px;
+    color: {T.TEXT};
+    background: transparent;
+}}
+
+QComboBox QAbstractItemView::item:hover,
+QListView#ComboPopup::item:hover,
+QComboBox QAbstractItemView::item:selected,
+QListView#ComboPopup::item:selected {{
+    background: {T.PRIMARY_TINT};
+    color: {T.TEXT};
+}}
+
+/* ---------- lists and selection ---------- */
+QListWidget#ImageList,
+QListWidget#PageThumbnailList,
+QListWidget#OrganizerPageGrid {{
+    background: {T.CARD_BG};
+    border: {border}px solid {T.HAIRLINE};
+    border-radius: {T.RADIUS_CARD}px;
+    outline: 0px;
+    padding: {T.SPACE_8}px;
+    color: {T.TEXT};
+}}
+
+QListWidget#ImageList:focus,
+QListWidget#PageThumbnailList:focus,
+QListWidget#OrganizerPageGrid:focus {{
+    border-color: {T.PRIMARY};
+}}
+
+QListWidget#ImageList::item,
+QListWidget#PageThumbnailList::item,
+QListWidget#OrganizerPageGrid::item {{
+    border: {selected_border} solid transparent;
+    border-radius: {T.RADIUS_CONTROL}px;
+    color: {T.TEXT};
+}}
+
+QListWidget#ImageList::item:hover:!selected,
+QListWidget#PageThumbnailList::item:hover {{
+    background: {T.PAGE_BG};
+}}
+
+QListWidget#ImageList::item:selected,
+QListWidget#PageThumbnailList::item:selected,
+QListWidget#OrganizerPageGrid::item:selected {{
+    background: {T.PRIMARY_TINT};
+    border: {selected_border} solid {T.PRIMARY};
+    color: {T.TEXT};
+}}
 
 QListWidget#ImageList[dropActive="true"],
 QListWidget#PageThumbnailList[dropActive="true"],
 QListWidget#OrganizerPageGrid[dropActive="true"],
-QFrame#DropArea[dropActive="true"] {
-    background: #f7fbff;
-    border-color: #8fb3df;
-}
+QFrame#DropArea[dropActive="true"] {{
+    background: {T.PRIMARY_TINT};
+    border-color: {T.PRIMARY};
+}}
 
-QListWidget#PageThumbnailList {
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-    background: #ffffff;
-    outline: 0;
-    padding: {px(8, scale, minimum=4)}px;
-}
-
-QListWidget#OrganizerPageGrid {
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-    background: #ffffff;
-    outline: 0;
-    padding: {px(10, scale, minimum=5)}px;
-}
-
-QListWidget#OrganizerPageGrid::item {
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: {px(4, scale, minimum=2)}px;
-}
-
-QListWidget#OrganizerPageGrid::item:selected {
-    background: #edf4fd;
-    border: 1px solid #8fb3df;
-}
-
-QFrame#OrganizerPageCard {
-    background: #ffffff;
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-}
-
-QFrame#OrganizerPageCard[selected="true"] {
-    background: #edf4fd;
-    border-color: #8fb3df;
-}
-
-QListWidget#PageThumbnailList::item {
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: {px(8, scale, minimum=4)}px;
-    color: #374151;
-}
-
-QListWidget#PageThumbnailList::item:selected {
-    background: #edf4fd;
-    border: 1px solid #8fb3df;
-    color: #163b66;
-}
-
-QListWidget#ImageList::item {
-    border: none;
-    padding: {px(4, scale, minimum=2)}px;
-}
-
-QListWidget#ImageList::item:selected {
-    background: #edf4fd;
-    border-radius: 6px;
-}
-
-QListWidget#ImageList::item:hover:!selected {
-    background: #f6f8fa;
-    border-radius: 6px;
-}
-
-QFrame#DropArea {
-    border: 1px dashed #b9c3cf;
-    border-radius: 8px;
-    background: #ffffff;
-}
-
-QFrame#StatusBar {
-    background: #ffffff;
-    border: 1px solid #e0e5eb;
-    border-radius: 6px;
-}
-
-QWidget#ImageRow {
+QWidget#ImageRow {{
     background: transparent;
-    border-radius: 6px;
-}
+}}
+
+QFrame#OrganizerPageCard {{
+    background: {T.CARD_BG};
+    border: {selected_border} solid {T.HAIRLINE};
+    border-radius: {T.RADIUS_CARD}px;
+}}
+
+QFrame#OrganizerPageCard[selected="true"] {{
+    background: {T.PRIMARY_TINT};
+    border: {selected_border} solid {T.PRIMARY};
+}}
+
+/* ---------- panels ---------- */
+QFrame#DropArea {{
+    background: {T.CARD_BG};
+    border: {border}px dashed {T.BORDER};
+    border-radius: {T.RADIUS_CARD}px;
+}}
 
 QFrame#SettingsPanel,
-QWidget#PreviewWidget {
-    background: #ffffff;
-    border: 1px solid #dfe4ea;
-    border-radius: 8px;
-}
+QWidget#PreviewWidget {{
+    background: {T.CARD_BG};
+    border: {border}px solid {T.HAIRLINE};
+    border-radius: {T.RADIUS_CARD}px;
+}}
 
-QScrollArea#SettingsScroll {
+QFrame#CorrectionsPanel {{
     background: transparent;
     border: none;
-}
+}}
 
-QScrollArea#SettingsScroll > QWidget > QWidget {
+QScrollArea#SettingsScroll {{
     background: transparent;
-}
+    border: none;
+}}
 
-QLabel#PanelHeading {
-    color: #1f2328;
-    font-size: {px(14, scale, minimum=10)}px;
-    font-weight: 700;
-}
-
-QLabel#CardTitle {
-    color: #1f2328;
-    font-size: {px(12, scale, minimum=9)}px;
-    font-weight: 700;
-}
-
-QLabel#CardMeta {
-    color: #66707c;
-    font-size: {px(11, scale, minimum=8)}px;
-}
-
-QLabel#FieldLabel {
-    color: #4f5b67;
-    font-size: {px(12, scale, minimum=9)}px;
-    font-weight: 600;
-}
-
-QComboBox {
-    background: #ffffff;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    color: #24292f;
-    min-height: {px(34, scale, minimum=24)}px;
-    padding: {px(4, scale, minimum=2)}px {px(10, scale, minimum=6)}px;
-}
-
-QComboBox QAbstractItemView,
-QListView#ComboPopup {
-    background: #ffffff;
-    color: #24292f;
-    border: 1px solid #cfd7e2;
-    selection-background-color: #edf4fd;
-    selection-color: #163b66;
-    outline: 0;
-}
-
-QComboBox QAbstractItemView::item,
-QListView#ComboPopup::item {
-    min-height: {px(28, scale, minimum=20)}px;
-    color: #24292f;
-    padding: {px(5, scale, minimum=3)}px {px(8, scale, minimum=5)}px;
-    background: #ffffff;
-}
-
-QComboBox QAbstractItemView::item:selected,
-QListView#ComboPopup::item:selected {
-    background: #edf4fd;
-    color: #163b66;
-}
-
-QComboBox:disabled {
-    color: #596575;
-    background: #f1f3f6;
-}
-
-QLineEdit {
-    background: #ffffff;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    color: #24292f;
-    min-height: {px(34, scale, minimum=24)}px;
-    padding: {px(4, scale, minimum=2)}px {px(10, scale, minimum=6)}px;
-}
-
-QLineEdit:read-only {
-    background: #f8fafc;
-}
-
-QProgressBar {
-    background: #eef2f6;
-    border: 1px solid #d8e0ea;
-    border-radius: 6px;
-    min-height: {px(10, scale, minimum=7)}px;
-}
-
-QProgressBar::chunk {
-    background: #1f4f82;
-    border-radius: 5px;
-}
-
-QPushButton#IconButton {
+QScrollArea#SettingsScroll > QWidget > QWidget {{
     background: transparent;
-    border: 1px solid transparent;
-    padding: {px(4, scale, minimum=2)}px;
-}
+}}
 
-QPushButton#IconButton:hover:enabled {
-    background: #f0f4f9;
-    border-color: #d8e0ea;
-}
+QFrame#StatusBar {{
+    background: {T.CARD_BG};
+    border: {border}px solid {T.HAIRLINE};
+    border-radius: {T.RADIUS_CONTROL}px;
+}}
 
-QPushButton#PresetButton {
-    text-align: center;
-    color: #24292f;
-    min-height: {px(34, scale, minimum=24)}px;
-    padding: {px(8, scale, minimum=4)}px {px(8, scale, minimum=4)}px;
-    background: #ffffff;
-}
+QFrame#Divider {{
+    color: {T.HAIRLINE};
+    background: {T.HAIRLINE};
+}}
 
-QPushButton#PresetButton:checked {
-    background: #eaf1fb;
-    border-color: #8fb3df;
-    color: #163b66;
-    font-weight: 600;
-}
+/* ---------- progress ---------- */
+QProgressBar {{
+    background: {T.HAIRLINE};
+    border: none;
+    border-radius: {T.PROGRESS_HEIGHT // 2}px;
+    min-height: {T.PROGRESS_HEIGHT}px;
+    max-height: {T.PROGRESS_HEIGHT}px;
+}}
 
-QPushButton#PresetButton:disabled {
-    color: #6f7a86;
-    background: #f5f7fa;
-}
+QProgressBar::chunk {{
+    background: {T.PRIMARY};
+    border-radius: {T.PROGRESS_HEIGHT // 2}px;
+}}
 
-QFrame#Divider {
-    color: #e1e6ec;
-    background: #e1e6ec;
-}
+/* ---------- tooltips ---------- */
+QToolTip {{
+    background: {T.TEXT};
+    color: {T.CARD_BG};
+    border: none;
+    padding: {T.SPACE_8}px {T.SPACE_12}px;
+    {_font(T.TYPE_BODY)}
+}}
 
-QLabel#ImageName {
-    color: #1f2328;
-    font-weight: 600;
-}
+/* ---------- scrollbars ---------- */
+QScrollBar:vertical {{
+    background: transparent;
+    width: {T.SCROLLBAR_WIDTH}px;
+    margin: {T.SPACE_4}px 0px;
+}}
 
-QLabel#ImageOrderNumber {
-    color: #536170;
-    font-size: {px(12, scale, minimum=9)}px;
-    font-weight: 700;
-}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: {T.SCROLLBAR_WIDTH}px;
+    margin: 0px {T.SPACE_4}px;
+}}
 
-QLabel#ImageDimensions,
-QLabel#SubtleText,
-QLabel#StatusText {
-    color: #66707c;
-}
+QScrollBar::handle:vertical {{
+    background: {T.BORDER};
+    border-radius: {T.SCROLLBAR_WIDTH // 2}px;
+    min-height: {T.SPACE_32}px;
+}}
+
+QScrollBar::handle:horizontal {{
+    background: {T.BORDER};
+    border-radius: {T.SCROLLBAR_WIDTH // 2}px;
+    min-width: {T.SPACE_32}px;
+}}
+
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover,
+QScrollBar::handle:vertical:pressed,
+QScrollBar::handle:horizontal:pressed {{
+    background: {T.TEXT_SECONDARY};
+}}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {{
+    width: 0px;
+    height: 0px;
+    border: none;
+    background: none;
+}}
+
+QScrollBar::add-page,
+QScrollBar::sub-page {{
+    background: none;
+}}
 """
-    replacements = {
-        "{px(13, scale, minimum=9)}": px(13, scale, minimum=9),
-        "{px(17, scale, minimum=11)}": px(17, scale, minimum=11),
-        "{px(9, scale)}": px(9, scale),
-        "{px(10, scale)}": px(10, scale),
-        "{px(34, scale, minimum=24)}": px(34, scale, minimum=24),
-        "{px(7, scale, minimum=4)}": px(7, scale, minimum=4),
-        "{px(11, scale, minimum=7)}": px(11, scale, minimum=7),
-        "{px(8, scale, minimum=4)}": px(8, scale, minimum=4),
-        "{px(10, scale, minimum=5)}": px(10, scale, minimum=5),
-        "{px(4, scale, minimum=2)}": px(4, scale, minimum=2),
-        "{px(14, scale, minimum=10)}": px(14, scale, minimum=10),
-        "{px(12, scale, minimum=9)}": px(12, scale, minimum=9),
-        "{px(11, scale, minimum=8)}": px(11, scale, minimum=8),
-        "{px(10, scale, minimum=6)}": px(10, scale, minimum=6),
-        "{px(28, scale, minimum=20)}": px(28, scale, minimum=20),
-        "{px(5, scale, minimum=3)}": px(5, scale, minimum=3),
-        "{px(8, scale, minimum=5)}": px(8, scale, minimum=5),
-        "{px(10, scale, minimum=7)}": px(10, scale, minimum=7),
-    }
-    for token, value in replacements.items():
-        style = style.replace(token, str(value))
-    return style
-
-
-APP_STYLE = build_app_style()

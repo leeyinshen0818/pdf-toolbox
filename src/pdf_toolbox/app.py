@@ -3,7 +3,6 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QIcon
@@ -13,16 +12,13 @@ from pdf_toolbox.build_metadata import APP_NAME, APP_ORGANIZATION, APP_VERSION
 from pdf_toolbox.core.heic_to_jpg import register_heic_support
 from pdf_toolbox.logging_config import configure_logging
 from pdf_toolbox.resources import app_icon_path
-from pdf_toolbox.ui.scale import calculate_ui_scale, set_ui_scale
-
-if TYPE_CHECKING:
-    from pdf_toolbox.ui.main_window import MainWindow
+from pdf_toolbox.ui.main_window import MainWindow
 
 
 logger = logging.getLogger(__name__)
 
 
-def ensure_window_starts_maximized(window: "MainWindow", app: QApplication) -> None:
+def ensure_window_starts_maximized(window: MainWindow, app: QApplication) -> None:
     screen = window.screen() or app.primaryScreen()
     if screen is not None:
         window.setGeometry(screen.availableGeometry())
@@ -45,10 +41,6 @@ def configure_qt_application(app: QApplication) -> None:
     else:
         logger.warning("Application icon not found: %s", icon_path)
 
-    screen = app.primaryScreen()
-    if screen is not None:
-        set_ui_scale(calculate_ui_scale(screen.availableGeometry().size()))
-
 
 def _show_startup_error(message: str) -> None:
     app = QApplication.instance()
@@ -70,8 +62,6 @@ def main() -> int:
         register_heic_support()
         app = QApplication(sys.argv)
         configure_qt_application(app)
-
-        from pdf_toolbox.ui.main_window import MainWindow
 
         window = MainWindow()
         ensure_window_starts_maximized(window, app)

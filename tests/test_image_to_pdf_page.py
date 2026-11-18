@@ -224,7 +224,7 @@ def test_corrections_are_collapsed_by_default_and_use_preset_buttons(app: QAppli
     page = ImageToPdfPage()
 
     assert not page.corrections_panel.isVisible()
-    assert page.corrections_toggle.text() == "Corrections v"
+    assert page.corrections_toggle.text() == "Corrections"
     assert set(page.sharpness_buttons) == set(SharpnessPreset)
     assert set(page.tone_buttons) == set(TonePreset)
     for button in [*page.sharpness_buttons.values(), *page.tone_buttons.values()]:

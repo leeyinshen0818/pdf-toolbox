@@ -25,8 +25,9 @@ from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
-from pdf_toolbox.ui.scale import scaled, ui_scale
 from pdf_toolbox.ui.styles import build_app_style
+from pdf_toolbox.ui import icons
+from pdf_toolbox.ui.tokens import ICON_SIDEBAR, PRIMARY, SPACE_8, SPACE_12, SPACE_16, TEXT_SECONDARY
 
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,8 @@ class MainWindow(QMainWindow):
         icon_path = app_icon_path()
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.resize(scaled(1040), scaled(720))
-        self.setMinimumSize(scaled(960), scaled(640))
+        self.resize(1040, 720)
+        self.setMinimumSize(960, 640)
 
         root = QWidget()
         root.setObjectName("Root")
@@ -81,7 +82,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stack, 1)
 
         self.setCentralWidget(root)
-        self.setStyleSheet(build_app_style(ui_scale()))
+        self.setStyleSheet(build_app_style())
 
     def _pages(self) -> tuple:
         return (self.image_to_pdf_page, self.pdf_to_image_page, self.pdf_organizer_page, self.heic_to_jpg_page)
@@ -137,48 +138,39 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setMinimumWidth(scaled(190))
-        sidebar.setMaximumWidth(scaled(230))
+        sidebar.setMinimumWidth(190)
+        sidebar.setMaximumWidth(230)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(scaled(16), scaled(20), scaled(16), scaled(20))
-        layout.setSpacing(scaled(10))
+        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
+        layout.setSpacing(SPACE_8)
 
         title = QLabel("PDF Toolbox")
         title.setObjectName("SidebarTitle")
         button_group = QButtonGroup(sidebar)
         button_group.setExclusive(True)
 
-        image_to_pdf = QPushButton("Image -> PDF")
-        image_to_pdf.setObjectName("NavButton")
-        image_to_pdf.setCheckable(True)
-        image_to_pdf.setChecked(True)
-        image_to_pdf.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        button_group.addButton(image_to_pdf)
-
-        pdf_to_image = QPushButton("PDF -> Image")
-        pdf_to_image.setObjectName("NavButton")
-        pdf_to_image.setCheckable(True)
-        pdf_to_image.clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        button_group.addButton(pdf_to_image)
-
-        organizer = QPushButton("PDF Organizer")
-        organizer.setObjectName("NavButton")
-        organizer.setCheckable(True)
-        organizer.clicked.connect(lambda: self.stack.setCurrentIndex(2))
-        button_group.addButton(organizer)
-
-        heic_to_jpg = QPushButton("HEIC -> JPG")
-        heic_to_jpg.setObjectName("NavButton")
-        heic_to_jpg.setCheckable(True)
-        heic_to_jpg.clicked.connect(lambda: self.stack.setCurrentIndex(3))
-        button_group.addButton(heic_to_jpg)
+        nav_items = [
+            ("Image → PDF", "file-image"),
+            ("PDF → Image", "images"),
+            ("PDF Organizer", "layout-grid"),
+            ("HEIC → JPG", "image"),
+        ]
+        nav_buttons: list[QPushButton] = []
+        for index, (label, icon_name) in enumerate(nav_items):
+            button = QPushButton(label)
+            button.setObjectName("NavButton")
+            button.setCheckable(True)
+            button.setIcon(icons.icon(icon_name, TEXT_SECONDARY, ICON_SIDEBAR, checked_colour=PRIMARY))
+            button.setIconSize(icons.icon_size(ICON_SIDEBAR))
+            button.clicked.connect(lambda _checked=False, index=index: self.stack.setCurrentIndex(index))
+            button_group.addButton(button)
+            nav_buttons.append(button)
+        nav_buttons[0].setChecked(True)
 
         layout.addWidget(title)
-        layout.addSpacing(scaled(12))
-        layout.addWidget(image_to_pdf)
-        layout.addWidget(pdf_to_image)
-        layout.addWidget(organizer)
-        layout.addWidget(heic_to_jpg)
+        layout.addSpacing(SPACE_12)
+        for button in nav_buttons:
+            layout.addWidget(button)
         layout.addStretch(1)
 
         return sidebar
