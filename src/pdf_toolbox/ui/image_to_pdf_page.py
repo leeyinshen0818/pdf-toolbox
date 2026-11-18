@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pdf_toolbox.core.image_collection import AddImagesResult, ImageCollection, ImageEntry
+from pdf_toolbox.core.image_collection import AddImagesResult, ImageCollection, ImageEntry, RejectedImage
 from pdf_toolbox.core.image_corrections import (
     CorrectionSettings,
     SharpnessPreset,
@@ -36,6 +36,7 @@ from pdf_toolbox.core.image_corrections import (
     apply_corrections,
     flatten_to_white,
 )
+from pdf_toolbox.core.lru_cache import LruCache
 from pdf_toolbox.core.pdf_exporter import PdfExporter
 from pdf_toolbox.core.pdf_geometry import (
     ExportSettings,
@@ -46,10 +47,14 @@ from pdf_toolbox.core.pdf_geometry import (
 )
 from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.ui.scale import scaled, scaled_size
+from pdf_toolbox.ui.threads import thread_is_running
 
 
 PATH_ROLE = Qt.UserRole + 1
 AUTO_ORIENTATION_LABEL = "Auto - Based on Image"
+PREVIEW_MAX_SIZE = (1100, 1100)
+PREVIEW_CACHE_ENTRIES = 10
+UNREADABLE_IMAGE_REASON = "This image could not be opened. The file may be damaged."
 logger = logging.getLogger(__name__)
 
 
@@ -316,7 +321,9 @@ class ImageToPdfPage(QWidget):
         self.collection = ImageCollection()
         self.export_thread: QThread | None = None
         self.export_worker: ExportWorker | None = None
-        self.preview_cache: dict[tuple[str, int, tuple[str, str]], tuple[QPixmap, tuple[int, int]]] = {}
+        self.preview_cache: LruCache[tuple[str, int, tuple[str, str]], tuple[QPixmap, tuple[int, int]]] = LruCache(
+            PREVIEW_CACHE_ENTRIES
+        )
         self.thumbnail_cache: dict[tuple[str, int], QPixmap] = {}
         self.sharpness_buttons: dict[SharpnessPreset, QPushButton] = {}
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
@@ -556,13 +563,32 @@ class ImageToPdfPage(QWidget):
 
     def _add_images(self, paths: list[str]) -> None:
         had_selection = bool(self.image_list.selectedItems())
-        result = self.collection.add_paths(paths)
-        self._sync_list_from_collection()
-        if result.added and not had_selection:
-            self._select_path(result.added[0].path)
+        result = self._reject_unreadable(self.collection.add_paths(paths))
+        # Selection changes during the rebuild would each regenerate the preview; refresh once below.
+        previous_blocked = self.image_list.blockSignals(True)
+        try:
+            self._sync_list_from_collection()
+            if result.added and not had_selection:
+                self._select_path(result.added[0].path)
+        finally:
+            self.image_list.blockSignals(previous_blocked)
         self._show_import_result(result)
+        self._sync_correction_controls()
         self._update_state()
         self._update_preview()
+
+    def _reject_unreadable(self, result: AddImagesResult) -> AddImagesResult:
+        """Header validation no longer decodes pixels; files whose thumbnail cannot be decoded are rejected here."""
+        unreadable = [entry for entry in result.added if self._load_thumbnail(entry.path) is None]
+        if not unreadable:
+            return result
+        self.collection.remove_paths([entry.path for entry in unreadable])
+        unreadable_paths = {entry.path for entry in unreadable}
+        return AddImagesResult(
+            added=tuple(entry for entry in result.added if entry.path not in unreadable_paths),
+            rejected=result.rejected + tuple(RejectedImage(entry.path, UNREADABLE_IMAGE_REASON) for entry in unreadable),
+            duplicates=result.duplicates,
+        )
 
     def _append_item(self, entry: ImageEntry, order_number: int) -> None:
         item = QListWidgetItem()
@@ -574,52 +600,68 @@ class ImageToPdfPage(QWidget):
         self.image_list.setItemWidget(item, row)
 
     def _thumbnail_for(self, path: Path) -> QPixmap:
+        pixmap = self._load_thumbnail(path)
+        if pixmap is None:
+            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
+            pixmap.fill(Qt.white)
+        return pixmap
+
+    def _load_thumbnail(self, path: Path) -> QPixmap | None:
         try:
             stat = path.stat()
         except OSError:
-            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
-            pixmap.fill(Qt.white)
-            return pixmap
+            return None
         cache_key = (str(path), stat.st_mtime_ns)
         cached = self.thumbnail_cache.get(cache_key)
         if cached is not None:
             return cached
 
+        target = scaled(54, minimum=37)
         reader = QImageReader(str(path))
         reader.setAutoTransform(True)
+        raw_size = reader.size()
+        if raw_size.isValid() and raw_size.width() > 0 and raw_size.height() > 0:
+            # Decode at reduced size (JPEG uses DCT scaling). The scaled size applies before
+            # auto-transform, so fit the raw aspect ratio; 2x headroom keeps the final smooth downscale sharp.
+            decode_size = raw_size.scaled(target * 2, target * 2, Qt.KeepAspectRatio)
+            if decode_size.width() < raw_size.width():
+                reader.setScaledSize(decode_size)
         image = reader.read()
         if image.isNull():
-            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
-            pixmap.fill(Qt.white)
-            return pixmap
-        pixmap = QPixmap.fromImage(image).scaled(
-            scaled(54, minimum=37),
-            scaled(54, minimum=37),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
+            logger.warning("Thumbnail could not be decoded: %s (%s)", path, reader.errorString())
+            return None
+        pixmap = QPixmap.fromImage(image).scaled(target, target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.thumbnail_cache[cache_key] = pixmap
         return pixmap
 
     def _sync_list_from_collection(self) -> None:
         selected_paths = {item.data(PATH_ROLE) for item in self.image_list.selectedItems()}
         current_path = self._current_path()
-        self.image_list.clear()
-        for order_number, entry in enumerate(self.collection.entries, start=1):
-            self._append_item(entry, order_number)
-            item = self.image_list.item(self.image_list.count() - 1)
-            if str(entry.path) in selected_paths:
-                item.setSelected(True)
-            if str(entry.path) == current_path:
-                self.image_list.setCurrentItem(item)
+        # Rebuilding restores selection item by item; keep that from firing a preview per item.
+        # Callers refresh controls, state, and preview once afterwards.
+        previous_blocked = self.image_list.blockSignals(True)
+        try:
+            self.image_list.clear()
+            for order_number, entry in enumerate(self.collection.entries, start=1):
+                self._append_item(entry, order_number)
+                item = self.image_list.item(self.image_list.count() - 1)
+                if str(entry.path) in selected_paths:
+                    item.setSelected(True)
+                if str(entry.path) == current_path:
+                    self.image_list.setCurrentItem(item)
+        finally:
+            self.image_list.blockSignals(previous_blocked)
 
     def _sync_order_from_list(self, paths: list[str]) -> None:
         try:
             self.collection.reorder_by_paths(paths)
         except ValueError:
             self._sync_list_from_collection()
+            self._sync_correction_controls()
+            self._update_state()
             return
         self._sync_list_from_collection()
+        self._sync_correction_controls()
         self._update_state()
         self._update_preview()
 
@@ -632,6 +674,7 @@ class ImageToPdfPage(QWidget):
             next_row = min(max(removed_index, 0), len(self.collection.entries) - 1)
             self.image_list.setCurrentRow(next_row)
         self.status_label.setText("Image removed.")
+        self._sync_correction_controls()
         self._update_state()
         self._update_preview()
 
@@ -682,6 +725,15 @@ class ImageToPdfPage(QWidget):
         self.export_thread.finished.connect(self.export_thread.deleteLater)
         self.export_thread.finished.connect(self._clear_export_worker)
         self.export_thread.start()
+
+    def is_exporting(self) -> bool:
+        return thread_is_running(self.export_thread)
+
+    def has_background_work(self) -> bool:
+        return self.is_exporting()
+
+    def stop_background_work(self) -> None:
+        """PDF export cannot be cancelled; the window waits for it instead."""
 
     def _on_export_progress(self, current: int, total: int) -> None:
         self.status_label.setText(f"Exporting PDF... {current}/{total}")
@@ -815,7 +867,10 @@ class ImageToPdfPage(QWidget):
         try:
             pixmap, size = self._preview_pixmap_for_entry(entry)
         except Exception:
-            self.preview.set_preview(None, None, self._export_settings(), "Select an image to preview")
+            logger.warning("Preview could not be generated for %s", entry.path, exc_info=True)
+            message = f"{entry.filename}: {UNREADABLE_IMAGE_REASON}"
+            self.preview.set_preview(None, None, self._export_settings(), message)
+            self.status_label.setText(message)
             return
         self.preview.set_preview(pixmap, size, self._export_settings())
 
@@ -826,16 +881,19 @@ class ImageToPdfPage(QWidget):
         if cached is not None:
             return cached
 
+        # Orientation-corrected full size from validation drives the page layout; the pixels
+        # are shrunk first (JPEG draft decode) and corrections run on the small image.
+        source_size = (entry.width, entry.height)
         with Image.open(entry.path) as image:
+            image.draft("RGB", PREVIEW_MAX_SIZE)
+            image.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS)
             corrected = apply_corrections(image, entry.corrections)
-            source_size = corrected.size
-            corrected.thumbnail((1100, 1100), Image.Resampling.LANCZOS)
-            flattened = flatten_to_white(corrected)
-            qimage = self._pil_to_qimage(flattened)
-            pixmap = QPixmap.fromImage(qimage)
-            result = (pixmap, source_size)
-            self.preview_cache[cache_key] = result
-            return result
+        flattened = flatten_to_white(corrected)
+        qimage = self._pil_to_qimage(flattened)
+        pixmap = QPixmap.fromImage(qimage)
+        result = (pixmap, source_size)
+        self.preview_cache[cache_key] = result
+        return result
 
     def _pil_to_qimage(self, image: Image.Image) -> QImage:
         rgb = image.convert("RGB")

@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 import pymupdf
 from PIL import Image
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QLabel, QPushButton
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QLabel, QMessageBox, QPushButton
 
 from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.image_corrections import CorrectionSettings, SharpnessPreset, TonePreset
@@ -377,3 +377,36 @@ def test_pdf_export_open_failure_does_not_invalidate_export(app: QApplication, t
     page._on_export_finished(str(output))
 
     assert page.status_label.text() == "PDF exported successfully, but the output folder could not be opened."
+
+
+def test_corrupt_or_truncated_images_report_a_per_file_error(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    good = make_image(tmp_path / "good.jpg")
+    complete = make_image(tmp_path / "complete.jpg", size=(640, 480))
+    truncated = tmp_path / "truncated.jpg"
+    truncated.write_bytes(complete.read_bytes()[: complete.stat().st_size // 2])
+    complete_png = make_image(tmp_path / "complete.png", size=(640, 480))
+    broken_png = tmp_path / "broken.png"
+    broken_png.write_bytes(complete_png.read_bytes()[: complete_png.stat().st_size // 2])
+    messages: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, _title, message: messages.append(message) or QMessageBox.Ok,
+    )
+    page = ImageToPdfPage()
+
+    page._add_images([str(good), str(truncated), str(broken_png)])
+    app.processEvents()
+
+    loaded = [entry.path for entry in page.collection.entries]
+    assert good in loaded
+    for damaged in (truncated, broken_png):
+        if damaged in loaded:
+            page._select_path(damaged)
+            app.processEvents()
+            messages.append(page.status_label.text())
+        assert any(damaged.name in message for message in messages), damaged.name

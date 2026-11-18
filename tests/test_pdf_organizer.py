@@ -244,6 +244,23 @@ def test_export_missing_source_fails_cleanly_without_output(tmp_path: Path) -> N
     assert not output.exists()
 
 
+def test_failed_overwrite_keeps_original_target_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    first = make_pdf(tmp_path / "first.pdf", ["A1"])
+    second = make_pdf(tmp_path / "second.pdf", ["B1"])
+    workspace = load_workspace(first, second)
+    second.unlink()
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    target = make_pdf(output_dir / "organized.pdf", ["Original"])
+    original_bytes = target.read_bytes()
+
+    with pytest.raises(PdfOrganizerExportError):
+        PdfOrganizerExporter().export(tuple(workspace.pages), target, overwrite=True)
+
+    assert target.read_bytes() == original_bytes
+    assert list(output_dir.iterdir()) == [target]
+
+
 def test_clear_workspace_does_not_delete_source_files(tmp_path: Path) -> None:
     source = make_pdf(tmp_path / "source.pdf", ["A1"])
     workspace = load_workspace(source)

@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from PIL import Image
 from PySide6.QtCore import QObject, QSettings, QSize, QStandardPaths, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -33,14 +34,23 @@ from pdf_toolbox.core.heic_to_jpg import (
     HeicImageEntry,
     HeicJpgSettings,
     HeicToJpgService,
+    RejectedHeic,
 )
+from pdf_toolbox.core.lru_cache import LruCache
 from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.core.pdf_to_image import JpgQuality
 from pdf_toolbox.ui.scale import scaled, scaled_size
+from pdf_toolbox.ui.threads import thread_is_running
 
 
 HEIC_PATH_ROLE = Qt.UserRole + 40
 HEIC_OUTPUT_FOLDER_SETTING = "heic_to_jpg/output_folder"
+HEIC_PREVIEW_MAX_SIZE = (1000, 1000)
+HEIC_PREVIEW_CACHE_ENTRIES = 10
+# Row thumbnails are small (~54 px); the cap only matters for very large batches, where an
+# evicted thumbnail would cost a full decode on the next list rebuild.
+HEIC_THUMBNAIL_CACHE_ENTRIES = 500
+UNDECODABLE_HEIC_REASON = "This HEIC image could not be opened. The file may be damaged."
 logger = logging.getLogger(__name__)
 
 
@@ -201,13 +211,13 @@ class HeicPreviewWidget(QWidget):
 
         inset = scaled(18, minimum=10)
         available = self.rect().adjusted(inset, inset, -inset, -inset)
-        scaled = self._pixmap.scaled(available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        x = available.x() + (available.width() - scaled.width()) // 2
-        y = available.y() + (available.height() - scaled.height()) // 2
+        fitted = self._pixmap.scaled(available.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        x = available.x() + (available.width() - fitted.width()) // 2
+        y = available.y() + (available.height() - fitted.height()) // 2
         painter.setPen(QPen(QColor("#cfd7e2"), 1))
         painter.setBrush(QColor("#ffffff"))
-        painter.drawRoundedRect(x - 6, y - 6, scaled.width() + 12, scaled.height() + 12, 4, 4)
-        painter.drawPixmap(x, y, scaled)
+        painter.drawRoundedRect(x - 6, y - 6, fitted.width() + 12, fitted.height() + 12, 4, 4)
+        painter.drawPixmap(x, y, fitted)
 
 
 class HeicConversionWorker(QObject):
@@ -254,8 +264,8 @@ class HeicToJpgPage(QWidget):
         super().__init__()
         self.service = HeicToJpgService()
         self.collection = HeicCollection()
-        self.thumbnail_cache: dict[tuple[str, int], QPixmap] = {}
-        self.preview_cache: dict[tuple[str, int], QPixmap] = {}
+        self.thumbnail_cache: LruCache[tuple[str, int], QPixmap] = LruCache(HEIC_THUMBNAIL_CACHE_ENTRIES)
+        self.preview_cache: LruCache[tuple[str, int], QPixmap] = LruCache(HEIC_PREVIEW_CACHE_ENTRIES)
         self.conversion_thread: QThread | None = None
         self.conversion_worker: HeicConversionWorker | None = None
         self.output_folder: Path | None = None
@@ -432,7 +442,7 @@ class HeicToJpgPage(QWidget):
 
     def _add_heic_paths(self, paths: list[str]) -> None:
         had_selection = bool(self.file_list.selectedItems())
-        result = self.collection.add_paths(paths, self.service)
+        result = self._reject_undecodable(self.collection.add_paths(paths, self.service))
         self._sync_list_from_collection()
         if result.added and not had_selection:
             self._select_path(result.added[0].path)
@@ -458,23 +468,50 @@ class HeicToJpgPage(QWidget):
             if str(entry.path) == current:
                 self.file_list.setCurrentItem(item)
 
+    def _reject_undecodable(self, result: AddHeicResult) -> AddHeicResult:
+        """Header validation no longer decodes pixels; decode each new file once here and reject failures."""
+        undecodable = [entry for entry in result.added if not self._decode_into_caches(entry)]
+        if not undecodable:
+            return result
+        for entry in undecodable:
+            self.collection.remove_path(entry.path)
+        undecodable_paths = {entry.path for entry in undecodable}
+        return AddHeicResult(
+            added=tuple(entry for entry in result.added if entry.path not in undecodable_paths),
+            rejected=result.rejected
+            + tuple(RejectedHeic(entry.path, UNDECODABLE_HEIC_REASON) for entry in undecodable),
+            duplicates=result.duplicates,
+        )
+
+    def _decode_into_caches(self, entry: HeicImageEntry) -> bool:
+        """One decode per file: the preview and the row thumbnail are both derived from it."""
+        cache_key = self._cache_key(entry.path)
+        try:
+            image = self.service.decode_preview_image(entry.path, max_size=HEIC_PREVIEW_MAX_SIZE)
+            preview = QPixmap.fromImage(pil_rgb_to_qimage(image))
+        except Exception:
+            logger.warning("HEIC image could not be decoded: %s", entry.path, exc_info=True)
+            return False
+        if preview.isNull():
+            return False
+        self.preview_cache[cache_key] = preview
+        self.thumbnail_cache[cache_key] = preview.scaled(
+            scaled(54, minimum=37),
+            scaled(54, minimum=37),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        return True
+
     def _thumbnail_for(self, entry: HeicImageEntry) -> QPixmap:
         cache_key = self._cache_key(entry.path)
         cached = self.thumbnail_cache.get(cache_key)
+        if cached is None and self._decode_into_caches(entry):
+            cached = self.thumbnail_cache.get(cache_key)
         if cached is not None:
             return cached
-        try:
-            data = self.service.render_preview_png_bytes(entry.path, max_size=(96, 96))
-            pixmap = pixmap_from_png_bytes(data).scaled(
-                scaled(54, minimum=37),
-                scaled(54, minimum=37),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-        except Exception:
-            pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
-            pixmap.fill(Qt.white)
-        self.thumbnail_cache[cache_key] = pixmap
+        pixmap = QPixmap(scaled(56, minimum=38), scaled(56, minimum=38))
+        pixmap.fill(Qt.white)
         return pixmap
 
     def _show_import_result(self, result: AddHeicResult) -> None:
@@ -567,6 +604,18 @@ class HeicToJpgPage(QWidget):
         thread.finished.connect(lambda thread=thread, worker=worker: self._clear_conversion_worker(thread, worker))
         thread.start()
 
+    def is_exporting(self) -> bool:
+        """Conversions are cancellable, so they never block closing behind a confirmation."""
+        return False
+
+    def has_background_work(self) -> bool:
+        return thread_is_running(self.conversion_thread)
+
+    def stop_background_work(self) -> None:
+        """Request cancellation; the worker stops after the current image."""
+        if self.conversion_worker is not None:
+            self.conversion_worker.cancel()
+
     def _cancel_conversion(self) -> None:
         if self.conversion_worker is not None:
             self.conversion_worker.cancel()
@@ -616,13 +665,13 @@ class HeicToJpgPage(QWidget):
             return
         cache_key = self._cache_key(entry.path)
         pixmap = self.preview_cache.get(cache_key)
+        if pixmap is None and self._decode_into_caches(entry):
+            pixmap = self.preview_cache.get(cache_key)
         if pixmap is None:
-            try:
-                pixmap = pixmap_from_png_bytes(self.service.render_preview_png_bytes(entry.path))
-            except Exception:
-                self.preview.set_preview(None, "Select an image to preview")
-                return
-            self.preview_cache[cache_key] = pixmap
+            message = f"{entry.filename}: {UNDECODABLE_HEIC_REASON}"
+            self.preview.set_preview(None, message)
+            self.status_label.setText(message)
+            return
         self.preview.set_preview(pixmap)
 
     def _update_info(self) -> None:
@@ -710,6 +759,12 @@ def default_output_folder() -> Path:
         if path.exists():
             return path
     return Path.home()
+
+
+def pil_rgb_to_qimage(image: Image.Image) -> QImage:
+    rgb = image if image.mode == "RGB" else image.convert("RGB")
+    data = rgb.tobytes("raw", "RGB")
+    return QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888).copy()
 
 
 def pixmap_from_png_bytes(data: bytes) -> QPixmap:

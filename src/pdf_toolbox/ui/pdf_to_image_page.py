@@ -37,6 +37,7 @@ from pdf_toolbox.core.pdf_to_image import (
 )
 from pdf_toolbox.core.pdf_to_image_state import PdfToImageState, pdf_key
 from pdf_toolbox.ui.scale import scaled, scaled_size
+from pdf_toolbox.ui.threads import thread_is_running
 
 
 PAGE_INDEX_ROLE = Qt.UserRole + 10
@@ -579,6 +580,19 @@ class PdfToImagePage(QWidget):
         self.conversion_thread.finished.connect(self.conversion_thread.deleteLater)
         self.conversion_thread.finished.connect(self._clear_conversion_worker)
         self.conversion_thread.start()
+
+    def is_exporting(self) -> bool:
+        """Conversions are cancellable, so they never block closing behind a confirmation."""
+        return False
+
+    def has_background_work(self) -> bool:
+        return thread_is_running(self.conversion_thread) or thread_is_running(self.thumbnail_thread)
+
+    def stop_background_work(self) -> None:
+        """Request cancellation; workers stop after the current page."""
+        self._stop_thumbnail_worker()
+        if self.conversion_worker is not None:
+            self.conversion_worker.cancel()
 
     def _cancel_conversion(self) -> None:
         if self.conversion_worker is not None:

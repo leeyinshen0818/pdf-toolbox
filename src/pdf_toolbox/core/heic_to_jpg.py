@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 import os
 import tempfile
@@ -9,6 +10,7 @@ from typing import Callable, Iterable
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
+from pdf_toolbox.core.image_validation import oriented_size
 from pdf_toolbox.core.pdf_to_image import JpgQuality, collision_safe_path, safe_filename_stem
 
 
@@ -147,16 +149,15 @@ class HeicToJpgService:
         if image_path.suffix.lower() not in SUPPORTED_HEIC_EXTENSIONS:
             raise HeicLoadError("Unsupported file type. Use HEIC or HEIF files.")
 
+        # Header only: the pixels are decoded once later, by decode_preview_image.
         try:
             with Image.open(image_path) as image:
                 if image.format != "HEIF":
                     raise HeicLoadError("This file is not a supported HEIC or HEIF image.")
-                oriented = ImageOps.exif_transpose(image)
-                oriented.load()
-                width, height = oriented.size
+                width, height = oriented_size(image)
         except HeicLoadError:
             raise
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HeicLoadError("This HEIC image could not be opened.") from exc
 
         if width <= 0 or height <= 0:
@@ -170,18 +171,22 @@ class HeicToJpgService:
             file_size_bytes=image_path.stat().st_size,
         )
 
-    def render_preview_png_bytes(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> bytes:
+    def decode_preview_image(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> Image.Image:
+        """Decode the file once and return an oriented RGB image no larger than max_size."""
         try:
             with Image.open(Path(path)) as image:
                 prepared = prepare_jpg_image(image)
-                prepared.thumbnail(max_size, Image.Resampling.LANCZOS)
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-                    temp_path = Path(temp_file.name)
-                try:
-                    prepared.save(temp_path, format="PNG")
-                    return temp_path.read_bytes()
-                finally:
-                    temp_path.unlink(missing_ok=True)
+            prepared.thumbnail(max_size, Image.Resampling.LANCZOS)
+            return prepared
+        except Exception as exc:
+            raise HeicLoadError("Preview unavailable for this image.") from exc
+
+    def render_preview_png_bytes(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> bytes:
+        prepared = self.decode_preview_image(path, max_size)
+        try:
+            buffer = BytesIO()
+            prepared.save(buffer, format="PNG")
+            return buffer.getvalue()
         except Exception as exc:
             raise HeicLoadError("Preview unavailable for this image.") from exc
 

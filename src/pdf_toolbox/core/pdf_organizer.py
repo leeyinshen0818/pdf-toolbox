@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pdf_toolbox.core.pdf_to_image import PdfInfo
@@ -17,6 +17,12 @@ class OrganizerPage:
     source_page_count: int
     rotation: int = 0
     duplicate_of: str | None = None
+    source_key: str = field(default="", compare=False)
+
+    def __post_init__(self) -> None:
+        # Resolve the source path once; thumbnail_key is read for every page on every thumbnail update.
+        if not self.source_key:
+            object.__setattr__(self, "source_key", pdf_key(self.source_path))
 
     @property
     def source_label(self) -> str:
@@ -24,7 +30,7 @@ class OrganizerPage:
 
     @property
     def thumbnail_key(self) -> tuple[str, int, int]:
-        return (pdf_key(self.source_path), self.source_page_index, self.rotation)
+        return (self.source_key, self.source_page_index, self.rotation)
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ class PdfOrganizerWorkspace:
                 source_filename=info.filename,
                 source_page_index=page_index,
                 source_page_count=info.page_count,
+                source_key=source_key,
             )
             for page_index in range(info.page_count)
         ]

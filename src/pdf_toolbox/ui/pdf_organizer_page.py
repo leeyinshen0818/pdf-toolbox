@@ -30,6 +30,7 @@ from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExporter
 from pdf_toolbox.core.pdf_organizer_thumbnail import PdfOrganizerThumbnailService
 from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
 from pdf_toolbox.ui.scale import scaled, scaled_size
+from pdf_toolbox.ui.threads import thread_is_running
 
 
 PAGE_ID_ROLE = Qt.UserRole + 30
@@ -380,6 +381,7 @@ class PdfOrganizerPage(QWidget):
         self.workspace = PdfOrganizerWorkspace()
         self.history = OrganizerHistory()
         self.thumbnail_cache: dict[tuple[str, int, int], QPixmap] = {}
+        self._items_by_page_id: dict[str, QListWidgetItem] = {}
         self.thumbnail_thread: QThread | None = None
         self.thumbnail_worker: OrganizerThumbnailWorker | None = None
         self.export_thread: QThread | None = None
@@ -539,13 +541,18 @@ class PdfOrganizerPage(QWidget):
     def _rebuild_grid(self, selected_ids: set[str] | None = None) -> None:
         selected = selected_ids or self._selected_page_ids()
         self.page_grid.setUpdatesEnabled(False)
+        # Restoring selection item by item would emit itemSelectionChanged once per item and
+        # repolish every card each time; callers refresh state once after the rebuild.
+        previous_blocked = self.page_grid.blockSignals(True)
         try:
             self.page_grid.clear()
+            self._items_by_page_id = {}
             for position, page in enumerate(self.workspace.pages, start=1):
                 item = QListWidgetItem()
                 item.setData(PAGE_ID_ROLE, page.page_id)
                 item.setSizeHint(CARD_SIZE)
                 self.page_grid.addItem(item)
+                self._items_by_page_id[page.page_id] = item
 
                 card = PageCardWidget(page, position)
                 card.delete_requested.connect(self._delete_one)
@@ -554,8 +561,10 @@ class PdfOrganizerPage(QWidget):
                 if pixmap is not None:
                     card.set_thumbnail(pixmap)
                 self.page_grid.setItemWidget(item, card)
-                item.setSelected(page.page_id in selected)
+                if page.page_id in selected:
+                    item.setSelected(True)
         finally:
+            self.page_grid.blockSignals(previous_blocked)
             self.page_grid.setUpdatesEnabled(True)
         self._sync_card_selection()
 
@@ -708,6 +717,7 @@ class PdfOrganizerPage(QWidget):
         self.history.clear()
         self.thumbnail_cache.clear()
         self.page_grid.clear()
+        self._items_by_page_id = {}
         self.progress_bar.setValue(0)
         self._update_info()
         self._update_state()
@@ -782,6 +792,16 @@ class PdfOrganizerPage(QWidget):
             self.export_worker = None
         self._update_state()
 
+    def is_exporting(self) -> bool:
+        return thread_is_running(self.export_thread)
+
+    def has_background_work(self) -> bool:
+        return self.is_exporting() or thread_is_running(self.thumbnail_thread)
+
+    def stop_background_work(self) -> None:
+        """Thumbnails stop after the current page; the export cannot be cancelled and is waited for."""
+        self._stop_thumbnail_worker()
+
     def _selected_page_ids(self) -> set[str]:
         return {item.data(PAGE_ID_ROLE) for item in self.page_grid.selectedItems()}
 
@@ -793,17 +813,17 @@ class PdfOrganizerPage(QWidget):
         for index in range(self.page_grid.count()):
             item = self.page_grid.item(index)
             card = self.page_grid.itemWidget(item)
-            if card is not None:
-                card.setProperty("selected", item.isSelected())
-                card.style().unpolish(card)
-                card.style().polish(card)
+            if card is None:
+                continue
+            selected = item.isSelected()
+            if bool(card.property("selected")) == selected:
+                continue
+            card.setProperty("selected", selected)
+            card.style().unpolish(card)
+            card.style().polish(card)
 
     def _item_for_page(self, page_id: str) -> QListWidgetItem | None:
-        for index in range(self.page_grid.count()):
-            item = self.page_grid.item(index)
-            if item.data(PAGE_ID_ROLE) == page_id:
-                return item
-        return None
+        return self._items_by_page_id.get(page_id)
 
     def _update_info(self) -> None:
         if not self.workspace.pages:

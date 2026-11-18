@@ -8,12 +8,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PIL import Image
 from PySide6.QtCore import QCoreApplication, QSettings
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 from pillow_heif import register_heif_opener
 
 from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.pdf_to_image import JpgQuality
-from pdf_toolbox.ui.heic_to_jpg_page import HEIC_OUTPUT_FOLDER_SETTING, HeicToJpgPage
+from pdf_toolbox.ui.heic_to_jpg_page import HEIC_OUTPUT_FOLDER_SETTING, HeicPreviewWidget, HeicToJpgPage
 
 
 register_heif_opener()
@@ -160,3 +161,18 @@ def test_success_failure_and_cancel_output_opening(
     page._on_conversion_failed("failed")
 
     assert calls == [output]
+
+
+def test_preview_widget_paints_loaded_pixmap(app: QApplication) -> None:
+    widget = HeicPreviewWidget()
+    widget.resize(400, 400)
+    source = QPixmap(120, 80)
+    source.fill(QColor(255, 0, 0))
+    widget.set_preview(source)
+
+    canvas = QPixmap(widget.size())
+    canvas.fill(QColor(0, 0, 0))
+    widget.render(canvas)
+
+    center = canvas.toImage().pixelColor(200, 200)
+    assert (center.red(), center.green(), center.blue()) == (255, 0, 0)

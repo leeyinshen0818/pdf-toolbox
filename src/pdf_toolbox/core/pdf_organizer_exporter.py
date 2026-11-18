@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from typing import Callable
 
 import pymupdf
@@ -37,14 +38,12 @@ class PdfOrganizerExporter:
             raise PdfOrganizerExportError("Export path cannot be one of the source PDFs.")
         if target.exists() and not overwrite:
             raise PdfOrganizerExportError("Output PDF already exists.")
-        if target.exists() and overwrite:
-            try:
-                target.unlink()
-            except OSError as exc:
-                raise PdfOrganizerExportError("Could not replace the existing output PDF.") from exc
 
+        # Build into a temp file in the target folder and only replace the target once the
+        # new PDF is complete, so a failed export never destroys an existing file.
         sources: dict[Path, pymupdf.Document] = {}
         output = pymupdf.open()
+        temp_path: Path | None = None
         try:
             for done, page in enumerate(pages, start=1):
                 source_path = Path(page.source_path)
@@ -72,18 +71,27 @@ class PdfOrganizerExporter:
                 if progress_callback is not None:
                     progress_callback(done, len(pages))
 
-            output.save(target)
-        except Exception:
-            if target.exists():
-                try:
-                    target.unlink()
-                except OSError:
-                    pass
-            raise
-        finally:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", dir=target.parent, delete=False) as temp_file:
+                temp_path = Path(temp_file.name)
+            output.save(temp_path)
             output.close()
+            try:
+                temp_path.replace(target)
+            except OSError as exc:
+                raise PdfOrganizerExportError("Could not replace the existing output PDF.") from exc
+            temp_path = None
+        except OSError as exc:
+            raise PdfOrganizerExportError("Could not write the organized PDF to the selected location.") from exc
+        finally:
+            if not output.is_closed:
+                output.close()
             for document in sources.values():
                 document.close()
+            if temp_path is not None and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
         return target
 
