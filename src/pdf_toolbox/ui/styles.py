@@ -342,7 +342,6 @@ QListView#ComboPopup::item:selected {{
 
 /* ---------- lists and selection ---------- */
 QListWidget#ImageList,
-QListWidget#PageThumbnailList,
 QListWidget#OrganizerPageGrid {{
     background: {T.CARD_BG};
     border: {border}px solid {T.HAIRLINE};
@@ -353,34 +352,36 @@ QListWidget#OrganizerPageGrid {{
 }}
 
 QListWidget#ImageList:focus,
-QListWidget#PageThumbnailList:focus,
 QListWidget#OrganizerPageGrid:focus {{
     border-color: {T.PRIMARY};
 }}
 
-QListWidget#ImageList::item,
-QListWidget#PageThumbnailList::item,
-QListWidget#OrganizerPageGrid::item {{
+QListWidget#ImageList::item {{
     border: {selected_border} solid transparent;
     border-radius: {T.RADIUS_CONTROL}px;
     color: {T.TEXT};
 }}
 
-QListWidget#ImageList::item:hover:!selected,
-QListWidget#PageThumbnailList::item:hover {{
+QListWidget#ImageList::item:hover:!selected {{
     background: {T.PAGE_BG};
 }}
 
-QListWidget#ImageList::item:selected,
-QListWidget#PageThumbnailList::item:selected,
-QListWidget#OrganizerPageGrid::item:selected {{
+QListWidget#ImageList::item:selected {{
     background: {T.PRIMARY_TINT};
     border: {selected_border} solid {T.PRIMARY};
     color: {T.TEXT};
 }}
 
+/* Organizer grid cells are wider than their cards; the card itself shows hover and selection. */
+QListWidget#OrganizerPageGrid::item,
+QListWidget#OrganizerPageGrid::item:hover,
+QListWidget#OrganizerPageGrid::item:selected {{
+    background: transparent;
+    border: none;
+    color: {T.TEXT};
+}}
+
 QListWidget#ImageList[dropActive="true"],
-QListWidget#PageThumbnailList[dropActive="true"],
 QListWidget#OrganizerPageGrid[dropActive="true"],
 QFrame#DropArea[dropActive="true"] {{
     background: {T.PRIMARY_TINT};
@@ -400,6 +401,118 @@ QFrame#OrganizerPageCard {{
 QFrame#OrganizerPageCard[selected="true"] {{
     background: {T.PRIMARY_TINT};
     border: {selected_border} solid {T.PRIMARY};
+}}
+
+QLabel#OrganizerCardTitle {{
+    color: {T.TEXT};
+    {_font(T.TYPE_BODY_STRONG)}
+    background: transparent;
+}}
+
+QLabel#OrganizerCardThumbnail {{
+    background: transparent;
+}}
+
+/* Trash button floating over the thumbnail; only shown on hover or selection. */
+QPushButton#CardDeleteButton {{
+    background: {T.CARD_BG};
+    border: {border}px solid {T.BORDER};
+    border-radius: {T.RADIUS_CONTROL}px;
+    min-height: {T.MIN_TARGET - 2 * border}px;
+    min-width: {T.MIN_TARGET - 2 * border}px;
+    padding: 0px;
+}}
+
+QPushButton#CardDeleteButton:hover {{
+    background: {T.DANGER_BG};
+    border-color: {T.DANGER_TEXT};
+}}
+
+QPushButton#CardDeleteButton:focus {{
+    border: {ring}px solid {T.PRIMARY};
+    min-height: {T.MIN_TARGET - 2 * ring}px;
+    min-width: {T.MIN_TARGET - 2 * ring}px;
+}}
+
+/* Clear: available but visually quiet next to the editing tools. */
+QPushButton#QuietButton {{
+    background: transparent;
+    border-color: transparent;
+    color: {T.TEXT_SECONDARY};
+}}
+
+QPushButton#QuietButton:hover {{
+    background: {T.PAGE_BG};
+    border-color: {T.BORDER};
+    color: {T.TEXT};
+}}
+
+QPushButton#QuietButton:disabled {{
+    background: transparent;
+    border-color: transparent;
+    color: {T.DISABLED_TEXT};
+}}
+
+/* ---------- thumbnail size slider ---------- */
+QSlider#SizeSlider {{
+    background: transparent;
+    min-height: 24px;
+}}
+
+QSlider#SizeSlider::groove:horizontal {{
+    height: 6px;
+    margin: 0px;
+    background: {T.HAIRLINE};
+    border: none;
+    border-radius: 3px;
+}}
+
+/* Qt paints sub-page/add-page at the slider's full height, so the 6px groove alone is the track. */
+QSlider#SizeSlider::sub-page:horizontal,
+QSlider#SizeSlider::add-page:horizontal {{
+    background: transparent;
+    border: none;
+}}
+
+QSlider#SizeSlider::handle:horizontal {{
+    background: {T.CARD_BG};
+    border: {ring}px solid {T.PRIMARY};
+    width: 16px;
+    height: 16px;
+    margin: -7px 0px;
+    border-radius: 10px;
+}}
+
+QSlider#SizeSlider::handle:horizontal:hover {{
+    background: {T.PRIMARY_TINT};
+}}
+
+QSlider#SizeSlider::handle:horizontal:focus {{
+    background: {T.PRIMARY_TINT};
+    border-color: {T.PRIMARY_PRESSED};
+}}
+
+QSlider#SizeSlider::handle:horizontal:disabled {{
+    border-color: {T.BORDER};
+}}
+
+QPushButton#SizeStepButton {{
+    background: transparent;
+    border: {border}px solid transparent;
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_CAPTION)}
+    min-height: {T.line_height(T.TYPE_CAPTION) + T.SPACE_4}px;
+    padding: 0px {T.SPACE_4}px;
+}}
+
+QPushButton#SizeStepButton:hover {{
+    color: {T.TEXT};
+    background: {T.PAGE_BG};
+}}
+
+QPushButton#SizeStepButton:checked {{
+    color: {T.PRIMARY};
+    font-weight: 700;
 }}
 
 /* ---------- panels ---------- */

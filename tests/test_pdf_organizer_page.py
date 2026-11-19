@@ -6,6 +6,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
 from pdf_toolbox.core.output_location import OpenLocationResult
@@ -68,13 +70,12 @@ def test_organizer_grid_shows_all_pages_with_source_metadata(app: QApplication, 
 
     assert page.page_grid.count() == 3
     assert page.stack.currentWidget() == page.page_grid
-    assert page.info_label.text() == "2 PDFs loaded - 3 pages"
+    assert page.info_label.text().startswith("2 PDFs loaded - 3 pages")
     assert page.page_grid.item(2).data(PAGE_ID_ROLE) == page.workspace.pages[2].page_id
     card = page.page_grid.itemWidget(page.page_grid.item(2))
     labels = [label.text() for label in card.findChildren(QLabel)]
     assert "Page 3" in labels
-    assert "second.pdf" in labels
-    assert "Original page 1" in labels
+    assert "second.pdf \u00b7 page 1" in labels
 
 
 def test_reorder_updates_workspace_order(app: QApplication, tmp_path: Path) -> None:
@@ -156,3 +157,68 @@ def test_loading_duplicate_source_does_not_add_pages(app: QApplication, tmp_path
     assert duplicate == []
     assert len(page.workspace.loaded_sources) == 1
     assert pdf_key(info.path) in page.workspace.loaded_sources
+
+
+def selected_ids(page: PdfOrganizerPage) -> set[str]:
+    return {item.data(PAGE_ID_ROLE) for item in page.page_grid.selectedItems()}
+
+
+def load_pages(page: PdfOrganizerPage, tmp_path: Path, count: int) -> list[str]:
+    page.workspace.add_pdf(fake_info(tmp_path / "pages.pdf", count))
+    page._rebuild_grid()
+    page._update_info()
+    page._update_state()
+    return page.workspace.page_ids()
+
+
+def test_alt_left_and_right_move_selected_pages_and_keep_them_selected(app: QApplication, tmp_path: Path) -> None:
+    page = PdfOrganizerPage()
+    ids = load_pages(page, tmp_path, 5)
+    page.page_grid.item(1).setSelected(True)
+    page.page_grid.item(2).setSelected(True)
+
+    QTest.keyClick(page.page_grid, Qt.Key_Right, Qt.AltModifier)
+
+    assert page.workspace.page_ids() == [ids[0], ids[3], ids[1], ids[2], ids[4]]
+    assert page.page_grid.page_ids() == page.workspace.page_ids()
+    assert selected_ids(page) == {ids[1], ids[2]}
+
+    QTest.keyClick(page.page_grid, Qt.Key_Left, Qt.AltModifier)
+    QTest.keyClick(page.page_grid, Qt.Key_Left, Qt.AltModifier)
+
+    assert page.workspace.page_ids() == [ids[1], ids[2], ids[0], ids[3], ids[4]]
+    assert selected_ids(page) == {ids[1], ids[2]}
+
+    QTest.keyClick(page.page_grid, Qt.Key_Left, Qt.AltModifier)  # already first: nothing changes
+    assert page.workspace.page_ids() == [ids[1], ids[2], ids[0], ids[3], ids[4]]
+
+    page._undo()  # each move is its own undo step
+    assert page.workspace.page_ids() == ids
+
+
+def test_escape_during_a_card_drag_leaves_the_order_unchanged(app: QApplication, tmp_path: Path) -> None:
+    page = PdfOrganizerPage()
+    page.resize(1200, 800)
+    page.show()
+    ids = load_pages(page, tmp_path, 6)
+    app.processEvents()
+    grid = page.page_grid
+    changes: list[tuple[list, list]] = []
+    grid.order_changed.connect(lambda before, after: changes.append((before, after)))
+    last = grid.card_rects()[-1]
+    end_of_grid = QPoint(int(last[2]) + 4, int((last[1] + last[3]) / 2))
+
+    grid.start_card_drag(grid.item(0), QPoint(10, 10))
+    grid.update_card_drag(end_of_grid)
+    assert grid.is_dragging()
+    QTest.keyClick(grid, Qt.Key_Escape)
+    grid.finish_card_drag(end_of_grid)  # the release that follows Esc must not drop
+
+    assert not grid.is_dragging()
+    assert changes == []
+    assert page.workspace.page_ids() == ids
+
+    # Without Esc the same drag does move the page to the end.
+    grid.start_card_drag(grid.item(0), QPoint(10, 10))
+    grid.finish_card_drag(end_of_grid)
+    assert page.workspace.page_ids() == ids[1:] + ids[:1]

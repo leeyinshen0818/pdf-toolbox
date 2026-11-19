@@ -66,6 +66,7 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     organizer_page = window.stack.widget(2)
     assert organizer_page.export_button.text() == "Export PDF"
     assert organizer_page.page_grid.isWrapping()
+    assert organizer_page.export_button.isVisible()
 
     window.stack.setCurrentIndex(3)
     app.processEvents()
@@ -151,8 +152,9 @@ def test_pdf_to_image_keeps_settings_to_the_right(app: QApplication) -> None:
     assert not hasattr(page, "_layout_mode")
 
 
-def test_pdf_organizer_toolbar_keeps_original_single_row_layout(app: QApplication) -> None:
+def test_pdf_organizer_toolbar_is_one_row_and_export_is_in_the_footer(app: QApplication) -> None:
     window = MainWindow()
+    window.resize(1366, 768)
     window.stack.setCurrentIndex(2)
     window.show()
     app.processEvents()
@@ -161,10 +163,21 @@ def test_pdf_organizer_toolbar_keeps_original_single_row_layout(app: QApplicatio
 
     assert isinstance(toolbar, QHBoxLayout)
     assert not toolbar.hasHeightForWidth()
-    assert page.add_button.isVisible()
-    assert page.rotate_right_button.isVisible()
-    assert page.delete_button.isVisible()
+    buttons = [
+        page.add_button,
+        page.rotate_left_button,
+        page.rotate_right_button,
+        page.duplicate_button,
+        page.delete_button,
+        page.undo_button,
+        page.redo_button,
+        page.clear_button,
+    ]
+    assert all(button.isVisible() for button in buttons)
+    assert all(toolbar.indexOf(button) >= 0 for button in buttons)
+    assert toolbar.indexOf(page.export_button) == -1
     assert page.export_button.isVisible()
+    assert page_y(page, page.export_button) > page_y(page, page.page_grid.parentWidget())
 
 
 def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:

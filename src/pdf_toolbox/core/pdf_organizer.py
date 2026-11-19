@@ -82,6 +82,26 @@ class PdfOrganizerWorkspace:
         page = self.pages.pop(from_index)
         self.pages.insert(to_index, page)
 
+    def move_pages(self, page_ids: set[str], step: int) -> bool:
+        """Move the given pages one place left (step=-1) or right (step=1), keeping their order.
+
+        Returns False (and changes nothing) when a page is already at that end.
+        """
+        if step not in (-1, 1):
+            raise ValueError("step must be -1 or 1")
+        flags = [page.page_id in page_ids for page in self.pages]
+        if not any(flags) or (step < 0 and flags[0]) or (step > 0 and flags[-1]):
+            return False
+        pages = list(self.pages)
+        indexes = range(len(pages)) if step < 0 else range(len(pages) - 1, -1, -1)
+        for index in indexes:
+            if flags[index]:
+                other = index + step
+                pages[index], pages[other] = pages[other], pages[index]
+                flags[index], flags[other] = flags[other], flags[index]
+        self.pages = pages
+        return True
+
     def delete_pages(self, page_ids: set[str]) -> list[OrganizerPage]:
         removed = [page for page in self.pages if page.page_id in page_ids]
         self.pages = [page for page in self.pages if page.page_id not in page_ids]
