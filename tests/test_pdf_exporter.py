@@ -8,7 +8,7 @@ from PIL import Image
 
 from pdf_toolbox.core.image_collection import ImageCollection
 from pdf_toolbox.core.image_corrections import CorrectionSettings, SharpnessPreset, TonePreset
-from pdf_toolbox.core.pdf_exporter import PdfExportError, PdfExporter
+from pdf_toolbox.core.pdf_exporter import PdfExportCancelled, PdfExportError, PdfExporter
 from pdf_toolbox.core.pdf_geometry import (
     A4_PORTRAIT,
     LETTER_PORTRAIT,
@@ -313,3 +313,30 @@ def test_output_file_already_exists_is_handled(tmp_path: Path) -> None:
 def test_empty_export_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(PdfExportError, match="at least one image"):
         PdfExporter().export([], tmp_path / "empty.pdf")
+
+
+def test_cancelled_export_keeps_existing_target_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    images = [make_rgb(sources / f"image_{index}.png") for index in range(3)]
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    target = output_dir / "existing.pdf"
+    target.write_bytes(b"%PDF-1.4 original document")
+    original_bytes = target.read_bytes()
+    checks = {"count": 0}
+
+    def cancel_after_first_image() -> bool:
+        checks["count"] += 1
+        return checks["count"] > 1
+
+    with pytest.raises(PdfExportCancelled):
+        PdfExporter().export(
+            collection_for(images).entries,
+            target,
+            overwrite=True,
+            cancel_callback=cancel_after_first_image,
+        )
+
+    assert target.read_bytes() == original_bytes
+    assert list(output_dir.iterdir()) == [target]

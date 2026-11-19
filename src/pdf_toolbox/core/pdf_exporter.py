@@ -19,6 +19,13 @@ class PdfExportError(Exception):
     """Raised when PDF export cannot complete."""
 
 
+class PdfExportCancelled(Exception):
+    """Raised when the user cancels an export; no output is written and any existing target is untouched."""
+
+    def __init__(self) -> None:
+        super().__init__("Export cancelled.")
+
+
 @dataclass(frozen=True)
 class ExportValidationIssue:
     path: Path
@@ -26,6 +33,7 @@ class ExportValidationIssue:
 
 
 ProgressCallback = Callable[[int, int], None]
+CancelCallback = Callable[[], bool]
 
 
 class PdfExporter:
@@ -51,6 +59,7 @@ class PdfExporter:
         settings: ExportSettings | None = None,
         overwrite: bool = False,
         progress_callback: ProgressCallback | None = None,
+        cancel_callback: CancelCallback | None = None,
     ) -> Path:
         ordered_entries = tuple(entries)
         if not ordered_entries:
@@ -77,6 +86,8 @@ class PdfExporter:
 
         try:
             for index, entry in enumerate(ordered_entries, start=1):
+                if cancel_callback is not None and cancel_callback():
+                    raise PdfExportCancelled()
                 image_bytes, width, height = self._prepare_image(entry.path, entry.corrections)
                 layout = calculate_page_layout(width, height, export_settings)
                 page = document.new_page(width=layout.page_size.width, height=layout.page_size.height)
@@ -88,6 +99,9 @@ class PdfExporter:
                 if progress_callback is not None:
                     progress_callback(index, len(ordered_entries))
 
+            if cancel_callback is not None and cancel_callback():
+                raise PdfExportCancelled()
+
             with tempfile.NamedTemporaryFile(
                 suffix=".pdf",
                 dir=parent,
@@ -97,9 +111,12 @@ class PdfExporter:
 
             document.save(temp_path)
             document.close()
-            destination.unlink(missing_ok=True)
+            # os.replace overwrites an existing target in one step, so a failure here never
+            # leaves the user without their previous file.
             temp_path.replace(destination)
             return destination
+        except PdfExportCancelled:
+            raise
         except OSError as exc:
             raise PdfExportError("Could not write the PDF to the selected location.") from exc
         except Exception as exc:

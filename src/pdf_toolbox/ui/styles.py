@@ -420,14 +420,37 @@ QScrollArea#SettingsScroll {{
     border: none;
 }}
 
-QScrollArea#SettingsScroll > QWidget > QWidget {{
+QScrollArea#SettingsScroll > QWidget > QWidget,
+QWidget#SettingsBody,
+QWidget#JobFooter,
+QWidget#EmptyState {{
     background: transparent;
 }}
 
-QFrame#StatusBar {{
-    background: {T.CARD_BG};
-    border: {border}px solid {T.HAIRLINE};
-    border-radius: {T.RADIUS_CONTROL}px;
+/* pinned footer of the settings card: a hairline separates it from the scrolling body */
+QWidget#SettingsFooter {{
+    background: transparent;
+    border-top: {border}px solid {T.HAIRLINE};
+}}
+
+/* ---------- status line (borderless, semantic colour) ---------- */
+QWidget#StatusLine,
+QLabel#StatusIcon {{
+    background: transparent;
+    border: none;
+}}
+
+QLabel#StatusText[kind="success"] {{
+    color: {T.SUCCESS_TEXT};
+}}
+
+QLabel#StatusText[kind="warning"] {{
+    color: {T.WARNING_TEXT};
+}}
+
+QLabel#StatusText[kind="error"] {{
+    color: {T.DANGER_TEXT};
+    font-weight: 600;
 }}
 
 QFrame#Divider {{

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pdf_toolbox.core.pdf_to_image import PdfInfo
+from pdf_toolbox.core.path_keys import path_key as pdf_key
 
 
 @dataclass(frozen=True)
@@ -154,10 +154,6 @@ class OrganizerHistory:
     @property
     def can_redo(self) -> bool:
         return bool(self.redo_stack)
-
-
-def pdf_key(path: str | Path) -> str:
-    return os.path.normcase(str(Path(path).resolve(strict=False)))
 
 
 def new_page_id() -> str:

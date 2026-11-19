@@ -5,14 +5,19 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QScrollArea
 
 from pdf_toolbox.app import ensure_window_starts_maximized
 from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.main_window import MainWindow
+from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
+
+
+def page_y(page, widget) -> int:
+    return widget.mapTo(page, QPoint(0, 0)).y()
 
 
 @pytest.fixture(scope="module")
@@ -117,7 +122,7 @@ def test_image_to_pdf_settings_controls_do_not_spread_vertically(app: QApplicati
     assert page.orientation_combo.y() - page.page_size_combo.y() <= 80
     assert page.margin_combo.y() - page.orientation_combo.y() <= 80
     assert page.corrections_toggle.y() - page.margin_combo.y() <= 80
-    assert page.export_button.y() > page.corrections_toggle.y()
+    assert page_y(page, page.export_button) > page_y(page, page.corrections_toggle)
 
 
 def test_heic_to_jpg_settings_controls_do_not_spread_vertically(app: QApplication) -> None:
@@ -128,8 +133,8 @@ def test_heic_to_jpg_settings_controls_do_not_spread_vertically(app: QApplicatio
 
     assert page.output_folder_edit.y() - page.jpg_quality_combo.y() <= 90
     assert page.set_default_folder_button.y() - page.output_folder_edit.y() <= 60
-    assert page.progress_bar.y() > page.set_default_folder_button.y()
-    assert page.convert_button.y() > page.progress_bar.y()
+    assert not page.progress_bar.isVisible()  # progress only shows while a conversion runs
+    assert page_y(page, page.convert_button) > page_y(page, page.set_default_folder_button)
 
 
 def test_pdf_to_image_keeps_settings_to_the_right(app: QApplication) -> None:
@@ -175,3 +180,10 @@ def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:
     assert buttons["HEIC → JPG"].isEnabled()
     buttons["HEIC → JPG"].click()
     assert window.stack.currentIndex() == 3
+
+
+@pytest.mark.parametrize("page_type", [ImageToPdfPage, PdfToImagePage, PdfOrganizerPage, HeicToJpgPage])
+def test_every_page_fits_a_600px_tall_work_area(app: QApplication, page_type) -> None:
+    page = page_type()
+
+    assert page.minimumSizeHint().height() <= 600

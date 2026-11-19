@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 
 from pdf_toolbox.core.pdf_organizer import OrganizerHistory, PdfOrganizerWorkspace
-from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExportError, PdfOrganizerExporter
+from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExportCancelled, PdfOrganizerExportError, PdfOrganizerExporter
 from pdf_toolbox.core.pdf_to_image import PdfToImageService
 
 
@@ -269,3 +269,28 @@ def test_clear_workspace_does_not_delete_source_files(tmp_path: Path) -> None:
 
     assert source.exists()
     assert workspace.pages == []
+
+
+def test_cancelled_export_keeps_existing_target_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    source = make_pdf(tmp_path / "source.pdf", ["A1", "A2", "A3"])
+    workspace = load_workspace(source)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    target = make_pdf(output_dir / "organized.pdf", ["Original"])
+    original_bytes = target.read_bytes()
+    checks = {"count": 0}
+
+    def cancel_after_first_page() -> bool:
+        checks["count"] += 1
+        return checks["count"] > 1
+
+    with pytest.raises(PdfOrganizerExportCancelled):
+        PdfOrganizerExporter().export(
+            tuple(workspace.pages),
+            target,
+            overwrite=True,
+            cancel_callback=cancel_after_first_page,
+        )
+
+    assert target.read_bytes() == original_bytes
+    assert list(output_dir.iterdir()) == [target]

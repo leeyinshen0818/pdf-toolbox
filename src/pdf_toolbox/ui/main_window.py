@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from PySide6.QtCore import QElapsedTimer, QEventLoop, QThread
+from PySide6.QtCore import QElapsedTimer, QEventLoop, QSize, QThread
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,6 +25,8 @@ from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
+from pdf_toolbox.ui.components.drop_area import local_paths
+from pdf_toolbox.ui.components.page import ToolPage
 from pdf_toolbox.ui.styles import build_app_style
 from pdf_toolbox.ui import icons
 from pdf_toolbox.ui.tokens import ICON_SIDEBAR, PRIMARY, SPACE_8, SPACE_12, SPACE_16, TEXT_SECONDARY
@@ -50,6 +52,22 @@ def wait_until(predicate: Callable[[], bool], timeout_ms: int | None = None) -> 
     return True
 
 
+class CurrentPageStack(QStackedWidget):
+    """Stacked widget sized by the visible page only, so the tallest page never sets the window minimum."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.currentChanged.connect(lambda _index: self.updateGeometry())
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -67,7 +85,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         sidebar = self._build_sidebar()
-        self.stack = QStackedWidget()
+        self.stack = CurrentPageStack()
         self.image_to_pdf_page = ImageToPdfPage()
         self.pdf_to_image_page = PdfToImagePage()
         self.pdf_organizer_page = PdfOrganizerPage()
@@ -83,6 +101,8 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self.setStyleSheet(build_app_style())
+        # Files dropped anywhere in the window go to the current page (same as its drop area).
+        self.setAcceptDrops(True)
 
     def _pages(self) -> tuple:
         return (self.image_to_pdf_page, self.pdf_to_image_page, self.pdf_organizer_page, self.heic_to_jpg_page)
@@ -101,27 +121,36 @@ class MainWindow(QMainWindow):
         finally:
             self._closing = False
 
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = local_paths(event.mimeData()) if event.mimeData().hasUrls() else []
+        if not paths:
+            super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        page = self.stack.currentWidget()
+        if isinstance(page, ToolPage) and not page.is_job_running():
+            page.add_dropped_files(paths)
+
     def _finish_background_work(self) -> bool:
         """Return True when no worker thread is left running and the window may close.
 
-        Exports (Image -> PDF, Organizer) cannot be cancelled: ask, then wait for them to finish.
-        Conversions and thumbnail rendering are cancelled and stop after the current page/image.
-        Threads are never abandoned, so each job's own temp-file cleanup always runs.
+        Every job (both exports, both conversions, thumbnail rendering) is cancelled and stops
+        after its current page or image; nothing is ever abandoned mid-write, so each job's own
+        temp-file cleanup always runs.
         """
         pages = self._pages()
-        exporting = [page for page in pages if page.is_exporting()]
-        if exporting:
-            answer = QMessageBox.question(
-                self,
-                "Export in Progress",
-                "A PDF export is still running.\n\nWait for it to finish and then close PDF Toolbox?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return False
-            wait_until(lambda: not any(page.is_exporting() for page in exporting))
-
         for page in pages:
             page.stop_background_work()
         if wait_until(lambda: not any(page.has_background_work() for page in pages), CANCEL_WAIT_TIMEOUT_MS):

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-import os
 import tempfile
 from typing import Callable, Iterable
 
@@ -12,6 +11,7 @@ from pillow_heif import register_heif_opener
 
 from pdf_toolbox.core.image_validation import oriented_size
 from pdf_toolbox.core.pdf_to_image import JpgQuality, collision_safe_path, safe_filename_stem
+from pdf_toolbox.core.path_keys import path_key as heic_key
 
 
 SUPPORTED_HEIC_EXTENSIONS = {".heic", ".heif"}
@@ -83,10 +83,6 @@ CancelCallback = Callable[[], bool]
 
 def register_heic_support() -> None:
     register_heif_opener()
-
-
-def heic_key(path: str | Path) -> str:
-    return os.path.normcase(str(Path(path).resolve(strict=False)))
 
 
 class HeicCollection:

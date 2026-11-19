@@ -3,24 +3,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRect, QSettings, QStandardPaths, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QRect, QSettings, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -36,10 +31,14 @@ from pdf_toolbox.core.pdf_to_image import (
     PdfPageRef,
     PdfToImageService,
 )
-from pdf_toolbox.core.pdf_to_image_state import PdfToImageState, pdf_key
+from pdf_toolbox.core.pdf_to_image_state import PdfToImageState
+from pdf_toolbox.ui.components.drop_area import empty_drop_area, local_paths, set_drop_active
+from pdf_toolbox.ui.components.page import ToolPage
+from pdf_toolbox.ui.components.settings_panel import SettingsPanel
+from pdf_toolbox.ui.components.widgets import default_output_folder, enum_combo, labeled_control, thumbnail_placeholder
 from pdf_toolbox.ui.threads import thread_is_running
 from pdf_toolbox.ui.metrics import PAGE_THUMBNAIL_ICON, PAGE_THUMBNAIL_IMAGE, page_thumbnail_item_size
-from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, PAGE_BG, SHADOW_RGBA, SPACE_12, SPACE_16, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, PAGE_BG, SHADOW_RGBA, SPACE_12, SPACE_4, SPACE_8
 
 
 PAGE_INDEX_ROLE = Qt.UserRole + 10
@@ -47,60 +46,12 @@ SOURCE_KEY_ROLE = Qt.UserRole + 11
 OUTPUT_FOLDER_SETTING = "pdf_to_image/output_folder"
 THUMBNAIL_ICON_SIZE = PAGE_THUMBNAIL_ICON
 THUMBNAIL_PAGE_MAX_SIZE = PAGE_THUMBNAIL_IMAGE
+CONVERSION_FAILED_MESSAGE = (
+    "The pages could not be converted. Check that the PDF still opens and that the output folder "
+    "is available, then try again."
+)
+WORK_AREA_MIN_HEIGHT = 200  # the page grid shrinks and scrolls so the page fits 1366x768
 logger = logging.getLogger(__name__)
-
-
-class PdfDropArea(QFrame):
-    files_dropped = Signal(list)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("DropArea")
-        self.setAcceptDrops(True)
-
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(SPACE_8)
-
-        title = QLabel("Add PDF files to convert pages into images")
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("DropTitle")
-        hint = QLabel("You can add multiple PDF files.")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setObjectName("SubtleText")
-        button = QPushButton("Add PDFs")
-        button.setObjectName("PrimaryButton")
-        button.clicked.connect(lambda: self.files_dropped.emit([]))
-
-        layout.addWidget(title)
-        layout.addWidget(hint)
-        layout.addWidget(button, alignment=Qt.AlignCenter)
-
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            set_drop_active(self, True)
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event) -> None:
-        set_drop_active(self, False)
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
-            return
-        super().dropEvent(event)
-
-    def dragLeaveEvent(self, event) -> None:
-        set_drop_active(self, False)
-        super().dragLeaveEvent(event)
 
 
 class PageThumbnailList(QListWidget):
@@ -135,8 +86,7 @@ class PageThumbnailList(QListWidget):
     def dropEvent(self, event) -> None:
         set_drop_active(self, False)
         if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
+            self.files_dropped.emit(local_paths(event.mimeData()))
             event.acceptProposedAction()
             return
         super().dropEvent(event)
@@ -219,7 +169,10 @@ class ConversionWorker(QObject):
         self.progress.emit(current, total, page_index, str(path))
 
 
-class PdfToImagePage(QWidget):
+class PdfToImagePage(ToolPage):
+    ACCEPTED_EXTENSIONS = frozenset({".pdf"})
+    ACCEPTED_DESCRIPTION = "PDF files"
+
     def __init__(self) -> None:
         super().__init__()
         self.service = PdfToImageService()
@@ -236,99 +189,59 @@ class PdfToImagePage(QWidget):
         self._update_state()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
-        layout.setSpacing(SPACE_12)
+        self.build_scaffold("PDF \u2192 Image", "Convert every page from uploaded PDFs into JPG or PNG images.")
 
-        title = QLabel("PDF → Image")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel("Convert every page from uploaded PDFs into JPG or PNG images.")
-        subtitle.setObjectName("SubtleText")
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
         self.add_button.clicked.connect(self._choose_pdf)
         self.clear_button.clicked.connect(self._clear_pdf)
-        toolbar.addWidget(self.add_button)
-        toolbar.addWidget(self.clear_button)
-        toolbar.addStretch(1)
+        self.action_bar.addWidget(self.add_button)
+        self.action_bar.addWidget(self.clear_button)
+        self.finish_action_bar()
 
-        self.content_layout = QHBoxLayout()
-        self.content_layout.setSpacing(SPACE_16)
+        self.pdf_info_label = self.count_label
 
         self.main_section = QWidget()
         main_area = QVBoxLayout(self.main_section)
         main_area.setContentsMargins(0, 0, 0, 0)
         main_area.setSpacing(SPACE_12)
 
-        self.pdf_info_label = QLabel("No PDF loaded")
-        self.pdf_info_label.setObjectName("SubtleText")
-
         self.stack = QStackedWidget()
-        self.empty_state = PdfDropArea()
-        self.empty_state.files_dropped.connect(self._handle_empty_add)
+        self.empty_state, empty = empty_drop_area(
+            "Add PDF files to convert pages into images",
+            "You can add multiple PDF files.",
+            "Add PDFs",
+        )
+        self.empty_state.files_dropped.connect(self.add_dropped_files)
+        empty.action_requested.connect(self._choose_pdf)
         self.thumbnail_list = PageThumbnailList()
-        self.thumbnail_list.files_dropped.connect(self._add_pdf_paths)
+        self.thumbnail_list.files_dropped.connect(self.add_dropped_files)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.thumbnail_list)
-        self.stack.setMinimumSize(520, 420)
+        self.stack.setMinimumSize(520, WORK_AREA_MIN_HEIGHT)
 
-        main_area.addWidget(self.pdf_info_label)
         main_area.addWidget(self.stack, 1)
 
         self.settings_panel = self._build_settings_panel()
         self.content_layout.addWidget(self.main_section, 1)
         self.content_layout.addWidget(self.settings_panel)
 
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("StatusText")
-        self.status_label.setWordWrap(True)
-        status_frame = QFrame()
-        status_frame.setObjectName("StatusBar")
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
-        status_layout.addWidget(self.status_label)
+    def _build_settings_panel(self) -> SettingsPanel:
+        panel = SettingsPanel("Conversion Settings", "Convert All Pages", min_width=340, max_width=430)
+        layout = panel.body_layout
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(toolbar)
-        layout.addLayout(self.content_layout, 1)
-        layout.addWidget(status_frame)
-
-    def _build_settings_panel(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setObjectName("SettingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(340)
-        scroll.setMaximumWidth(430)
-
-        panel = QFrame()
-        panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(330)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
-        layout.setSpacing(SPACE_12)
-
-        heading = QLabel("Conversion Settings")
-        heading.setObjectName("PanelHeading")
-        layout.addWidget(heading)
-
-        self.format_combo = self._combo(OutputFormat)
+        self.format_combo = enum_combo(OutputFormat, min_contents_length=14, popup_min_width=320)
         self.format_combo.currentIndexChanged.connect(self._on_format_changed)
-        layout.addLayout(self._labeled_control("Format", self.format_combo))
+        layout.addLayout(labeled_control("Format", self.format_combo))
 
-        self.dpi_combo = self._combo(DpiPreset)
+        self.dpi_combo = enum_combo(DpiPreset, min_contents_length=14, popup_min_width=320)
         self.dpi_combo.setCurrentIndex(self.dpi_combo.findData(DpiPreset.HIGH.value))
-        layout.addLayout(self._labeled_control("Resolution", self.dpi_combo))
+        layout.addLayout(labeled_control("Resolution", self.dpi_combo))
 
         self.jpg_quality_container = QWidget()
-        self.jpg_quality_combo = self._combo(JpgQuality)
-        jpg_quality_layout = self._labeled_control("JPG Quality", self.jpg_quality_combo)
+        self.jpg_quality_combo = enum_combo(JpgQuality, min_contents_length=14, popup_min_width=320)
+        jpg_quality_layout = labeled_control("JPG Quality", self.jpg_quality_combo)
         self.jpg_quality_combo.setCurrentIndex(self.jpg_quality_combo.findData(JpgQuality.MAXIMUM.value))
         self.jpg_quality_container.setLayout(jpg_quality_layout)
         layout.addWidget(self.jpg_quality_container)
@@ -337,6 +250,7 @@ class PdfToImagePage(QWidget):
         output_label.setObjectName("FieldLabel")
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
+        self.output_folder_edit.setAcceptDrops(False)  # let file drops reach the window
         self.output_folder_edit.setPlaceholderText("Choose a folder")
         self.output_folder_edit.setMinimumWidth(150)
         self.output_folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -353,57 +267,23 @@ class PdfToImagePage(QWidget):
         layout.addWidget(output_label)
         layout.addLayout(output_row)
         layout.addWidget(self.set_default_folder_button)
+        panel.finish_body()
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
-        layout.addWidget(self.progress_bar)
-
-        self.convert_button = QPushButton("Convert All Pages")
-        self.convert_button.setObjectName("PrimaryButton")
+        self.job_footer = panel.footer
+        self.convert_button = panel.footer.primary_button
         self.convert_button.clicked.connect(self._start_conversion)
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self._cancel_conversion)
-        layout.addWidget(self.convert_button)
-        layout.addWidget(self.cancel_button)
-
-        scroll.setWidget(panel)
-        return scroll
-
-    def _combo(self, enum_type) -> QComboBox:
-        combo = QComboBox()
-        combo.setMinimumHeight(CONTROL_HEIGHT)
-        combo.setMinimumWidth(260)
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(14)
-        for item in enum_type:
-            combo.addItem(item.value, item.value)
-        # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
-        combo.setItemDelegate(QStyledItemDelegate(combo))
-        combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(320)
-        return combo
-
-    def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(SPACE_4)
-        text = QLabel(label)
-        text.setObjectName("FieldLabel")
-        layout.addWidget(text)
-        layout.addWidget(control)
-        return layout
+        self.progress_bar = panel.footer.progress_bar
+        self.cancel_button = panel.footer.cancel_button
+        panel.footer.cancel_requested.connect(self._cancel_conversion)
+        return panel
 
     def _choose_pdf(self) -> None:
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Select PDFs", "", "PDF files (*.pdf)")
         if file_paths:
             self._add_pdf_paths(file_paths)
 
-    def _handle_empty_add(self, paths: list[str]) -> None:
-        if paths:
-            self._add_pdf_paths(paths)
-        else:
-            self._choose_pdf()
+    def add_files(self, paths: list[str]) -> None:
+        self._add_pdf_paths(paths)
 
     def _add_pdf_paths(self, paths: list[str]) -> None:
         pdf_paths = [Path(path) for path in paths if Path(path).suffix.lower() == ".pdf"]
@@ -441,13 +321,16 @@ class PdfToImagePage(QWidget):
             messages.append(f"Skipped {duplicates} duplicate PDF(s).")
         if errors:
             messages.append(f"Rejected {len(errors)} PDF(s).")
-        self.status_label.setText(" ".join(messages) if messages else "No PDFs added.")
+        if errors or duplicates:
+            self.status_label.show_warning(" ".join(messages))
+        else:
+            self.status_label.setText(" ".join(messages) if messages else "No PDFs added.")
         if errors:
             QMessageBox.warning(self, "Some PDFs Were Not Added", "\n".join(errors[:8]))
 
     def _populate_page_items(self) -> None:
         self.thumbnail_list.clear()
-        placeholder = thumbnail_placeholder("Loading")
+        placeholder = thumbnail_placeholder("Loading", THUMBNAIL_ICON_SIZE)
         for document in self.state.loaded_pdfs:
             for page_index in range(document.info.page_count):
                 item = QListWidgetItem(f"{document.info.filename}\nPage {page_index + 1}")
@@ -507,12 +390,12 @@ class PdfToImagePage(QWidget):
             item.setIcon(pixmap)
 
     def _on_thumbnail_preview_failed(self, source_key: str, page_index: int, message: str) -> None:
-        pixmap = thumbnail_placeholder("Preview\nunavailable")
+        pixmap = thumbnail_placeholder("Preview\nunavailable", THUMBNAIL_ICON_SIZE)
         self.thumbnail_cache[(source_key, page_index)] = pixmap
         item = self._item_for_page(source_key, page_index)
         if item is not None:
             item.setIcon(pixmap)
-        self.status_label.setText("Some page previews could not be generated, but conversion can continue.")
+        self.status_label.show_warning("Some page previews could not be generated, but conversion can continue.")
 
     def _on_thumbnail_failed(self, message: str) -> None:
         self.status_label.setText(message)
@@ -535,7 +418,7 @@ class PdfToImagePage(QWidget):
             self.status_label.setText("Choose an output folder before saving a default.")
             return
         self._save_output_folder_setting(self.state.output_folder)
-        self.status_label.setText("Default output folder saved.")
+        self.status_label.show_success("Default output folder saved.")
 
     def _on_format_changed(self, _index: int | None = None) -> None:
         self.state.output_format = OutputFormat(self.format_combo.currentData())
@@ -558,10 +441,9 @@ class PdfToImagePage(QWidget):
             dpi=DpiPreset(self.dpi_combo.currentData()),
             jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()),
         )
-        self.progress_bar.setMaximum(len(page_refs))
-        self.progress_bar.setValue(0)
-        self.status_label.setText(f"Converting 0 of {len(page_refs)} pages...")
         self._set_converting(True)
+        self.job_footer.set_progress(0, len(page_refs))
+        self.status_label.setText(f"Converting 0 of {len(page_refs)} pages...")
 
         self.conversion_thread = QThread(self)
         self.conversion_worker = ConversionWorker(
@@ -583,10 +465,6 @@ class PdfToImagePage(QWidget):
         self.conversion_thread.finished.connect(self._clear_conversion_worker)
         self.conversion_thread.start()
 
-    def is_exporting(self) -> bool:
-        """Conversions are cancellable, so they never block closing behind a confirmation."""
-        return False
-
     def has_background_work(self) -> bool:
         return thread_is_running(self.conversion_thread) or thread_is_running(self.thumbnail_thread)
 
@@ -600,21 +478,20 @@ class PdfToImagePage(QWidget):
         if self.conversion_worker is not None:
             self.conversion_worker.cancel()
             self.status_label.setText("Cancelling after the current page...")
-            self.cancel_button.setEnabled(False)
 
     def _on_conversion_progress(self, current: int, total: int, page_index: int, path: str) -> None:
-        self.progress_bar.setValue(current)
+        self.job_footer.set_progress(current, total)
         self.status_label.setText(f"Converting {current} of {total} pages...")
 
     def _on_conversion_finished(self, paths: object) -> None:
         completed = tuple(paths)
         self._set_converting(False)
-        self.status_label.setText(f"Conversion complete - {len(completed)} image(s) saved.")
+        self.status_label.show_success(f"Conversion complete - {len(completed)} image(s) saved.")
         if completed and self.state.output_folder is not None:
             result = self.open_output_location(self.state.output_folder)
             if not result.success:
                 logger.warning("Could not open PDF to image output folder: %s", result.message)
-                self.status_label.setText("Conversion complete, but the output folder could not be opened.")
+                self.status_label.show_warning("Conversion complete, but the output folder could not be opened.")
 
     def _on_conversion_cancelled(self, paths: object) -> None:
         completed = tuple(paths)
@@ -623,8 +500,8 @@ class PdfToImagePage(QWidget):
 
     def _on_conversion_failed(self, message: str) -> None:
         self._set_converting(False)
-        self.status_label.setText(message)
-        QMessageBox.critical(self, "Conversion Failed", message)
+        logger.error("PDF to image conversion failed: %s", message)
+        self.status_label.show_error(CONVERSION_FAILED_MESSAGE)
 
     def _clear_conversion_worker(self) -> None:
         self.conversion_thread = None
@@ -637,7 +514,6 @@ class PdfToImagePage(QWidget):
         self.thumbnail_list.clear()
         self.thumbnail_cache.clear()
         self.pdf_info_label.setText("No PDF loaded")
-        self.progress_bar.setValue(0)
         self.status_label.setText("PDF cleared.")
         self._update_state()
 
@@ -660,8 +536,7 @@ class PdfToImagePage(QWidget):
         self.stack.setCurrentWidget(self.thumbnail_list if has_pdf else self.empty_state)
         self.clear_button.setEnabled(has_pdf and not converting)
         self.convert_button.setEnabled(has_pages and has_output and not converting)
-        self.cancel_button.setVisible(converting)
-        self.cancel_button.setEnabled(converting)
+        self.job_footer.set_running(converting)
         self.add_button.setEnabled(not converting)
         self.thumbnail_list.setEnabled(not converting)
         self.format_combo.setEnabled(not converting)
@@ -678,9 +553,7 @@ class PdfToImagePage(QWidget):
     def _set_converting(self, converting: bool) -> None:
         self.add_button.setEnabled(not converting)
         self.clear_button.setEnabled(not converting and bool(self.state.loaded_pdfs))
-        self.convert_button.setVisible(not converting)
-        self.cancel_button.setVisible(converting)
-        self.cancel_button.setEnabled(converting)
+        self.job_footer.set_running(converting)
         self.thumbnail_list.setEnabled(not converting)
         self.format_combo.setEnabled(not converting)
         self.dpi_combo.setEnabled(not converting)
@@ -710,42 +583,11 @@ class PdfToImagePage(QWidget):
         QSettings().setValue(OUTPUT_FOLDER_SETTING, str(folder))
 
 
-def default_output_folder() -> Path:
-    pictures = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
-    if pictures:
-        path = Path(pictures)
-        if path.exists():
-            return path
-    return Path.home()
-
-
 def thumbnail_from_png_bytes(data: bytes) -> QPixmap:
     source = QPixmap()
     if not source.loadFromData(data):
-        return thumbnail_placeholder("Preview\nunavailable")
+        return thumbnail_placeholder("Preview\nunavailable", THUMBNAIL_ICON_SIZE)
     return framed_thumbnail(source)
-
-
-def thumbnail_placeholder(text: str) -> QPixmap:
-    canvas = QPixmap(THUMBNAIL_ICON_SIZE)
-    canvas.fill(QColor(CARD_BG))
-    painter = QPainter(canvas)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.fillRect(canvas.rect(), QColor(PAGE_BG))
-    page_rect = QRect(
-        13,
-        12,
-        THUMBNAIL_ICON_SIZE.width() - 26,
-        THUMBNAIL_ICON_SIZE.height() - 34,
-    )
-    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(*SHADOW_RGBA))
-    painter.fillRect(page_rect, QColor(CARD_BG))
-    painter.setPen(QPen(QColor(BORDER), 1))
-    painter.drawRect(page_rect)
-    painter.setPen(QColor(TEXT_SECONDARY))
-    painter.drawText(page_rect, Qt.AlignCenter, text)
-    painter.end()
-    return canvas
 
 
 def framed_thumbnail(source: QPixmap) -> QPixmap:
@@ -766,9 +608,3 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter.drawRect(page_rect)
     painter.end()
     return canvas
-
-
-def set_drop_active(widget: QWidget, active: bool) -> None:
-    widget.setProperty("dropActive", active)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)

@@ -16,80 +16,34 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
-    QWidget,
 )
 
 from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.core.pdf_organizer import OrganizerHistory, OrganizerPage, PdfOrganizerWorkspace
-from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExporter
+from pdf_toolbox.core.pdf_organizer_exporter import PdfOrganizerExportCancelled, PdfOrganizerExporter
 from pdf_toolbox.core.pdf_organizer_thumbnail import PdfOrganizerThumbnailService
 from pdf_toolbox.core.pdf_to_image import PdfLoadError, PdfToImageService
+from pdf_toolbox.ui.components.drop_area import empty_drop_area, local_paths, set_drop_active
+from pdf_toolbox.ui.components.job_footer import JobFooter
+from pdf_toolbox.ui.components.page import ToolPage
+from pdf_toolbox.ui.components.widgets import ElidedLabel, thumbnail_placeholder
 from pdf_toolbox.ui.threads import thread_is_running
 from pdf_toolbox.ui import icons
 from pdf_toolbox.ui.metrics import CARD_THUMBNAIL, caption_label_height, organizer_card_size
-from pdf_toolbox.ui.tokens import BORDER, CARD_BG, ICON_DELETE, MIN_TARGET, PAGE_BG, SHADOW_RGBA, SPACE_12, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, ICON_DELETE, MIN_TARGET, PAGE_BG, SHADOW_RGBA, SPACE_12, SPACE_4, SPACE_8, TEXT_SECONDARY
 
 
 PAGE_ID_ROLE = Qt.UserRole + 30
 THUMBNAIL_SIZE = CARD_THUMBNAIL
+EXPORT_FAILED_MESSAGE = (
+    "The organized PDF could not be saved. Check that the original PDFs are still in their folder "
+    "and that the save location is available, then try again."
+)
+WORK_AREA_MIN_HEIGHT = 200  # the page grid shrinks and scrolls so the page fits 1366x768
 logger = logging.getLogger(__name__)
-
-
-class OrganizerDropArea(QFrame):
-    files_dropped = Signal(list)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("DropArea")
-        self.setAcceptDrops(True)
-
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(SPACE_8)
-
-        title = QLabel("Add PDFs to start organizing pages")
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("DropTitle")
-        hint = QLabel("Drop one or more PDF files here.")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setObjectName("SubtleText")
-        button = QPushButton("Add PDFs")
-        button.setObjectName("PrimaryButton")
-        button.clicked.connect(lambda: self.files_dropped.emit([]))
-
-        layout.addWidget(title)
-        layout.addWidget(hint)
-        layout.addWidget(button, alignment=Qt.AlignCenter)
-
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            set_drop_active(self, True)
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event) -> None:
-        set_drop_active(self, False)
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
-            return
-        super().dropEvent(event)
-
-    def dragLeaveEvent(self, event) -> None:
-        set_drop_active(self, False)
-        super().dragLeaveEvent(event)
 
 
 class OrganizerPageGrid(QListWidget):
@@ -225,8 +179,7 @@ class OrganizerPageGrid(QListWidget):
     def dropEvent(self, event) -> None:
         set_drop_active(self, False)
         if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
+            self.files_dropped.emit(local_paths(event.mimeData()))
             event.acceptProposedAction()
             return
 
@@ -277,7 +230,7 @@ class PageCardWidget(QFrame):
         self.thumbnail = QLabel()
         self.thumbnail.setFixedSize(THUMBNAIL_SIZE)
         self.thumbnail.setAlignment(Qt.AlignCenter)
-        self.thumbnail.setPixmap(thumbnail_placeholder("Loading"))
+        self.thumbnail.setPixmap(thumbnail_placeholder("Loading", THUMBNAIL_SIZE))
 
         source = ElidedLabel(page.source_filename)
         source.setObjectName("CardMeta")
@@ -300,22 +253,6 @@ class PageCardWidget(QFrame):
 
     def set_thumbnail(self, pixmap: QPixmap) -> None:
         self.thumbnail.setPixmap(pixmap)
-
-
-class ElidedLabel(QLabel):
-    def __init__(self, text: str) -> None:
-        super().__init__()
-        self.full_text = text
-        self.setToolTip(text)
-        self.setText(text)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._refresh_text()
-
-    def _refresh_text(self) -> None:
-        available_width = max(24, self.width())
-        self.setText(self.fontMetrics().elidedText(self.full_text, Qt.ElideMiddle, available_width))
 
 
 class OrganizerThumbnailWorker(QObject):
@@ -350,6 +287,7 @@ class OrganizerExportWorker(QObject):
     progress = Signal(int, int)
     finished = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, pages: tuple[OrganizerPage, ...], output_path: Path, overwrite: bool) -> None:
         super().__init__()
@@ -357,6 +295,10 @@ class OrganizerExportWorker(QObject):
         self.output_path = output_path
         self.overwrite = overwrite
         self.exporter = PdfOrganizerExporter()
+        self.cancel_requested = False
+
+    def cancel(self) -> None:
+        self.cancel_requested = True
 
     def run(self) -> None:
         try:
@@ -365,7 +307,11 @@ class OrganizerExportWorker(QObject):
                 self.output_path,
                 overwrite=self.overwrite,
                 progress_callback=self.progress.emit,
+                cancel_callback=lambda: self.cancel_requested,
             )
+        except PdfOrganizerExportCancelled:
+            self.cancelled.emit()
+            return
         except Exception as exc:
             logger.exception("PDF organizer export failed")
             self.failed.emit(str(exc))
@@ -373,7 +319,10 @@ class OrganizerExportWorker(QObject):
         self.finished.emit(str(result))
 
 
-class PdfOrganizerPage(QWidget):
+class PdfOrganizerPage(ToolPage):
+    ACCEPTED_EXTENSIONS = frozenset({".pdf"})
+    ACCEPTED_DESCRIPTION = "PDF files"
+
     def __init__(self) -> None:
         super().__init__()
         self.service = PdfToImageService()
@@ -392,17 +341,11 @@ class PdfOrganizerPage(QWidget):
         self._update_state()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
-        layout.setSpacing(SPACE_12)
+        self.build_scaffold(
+            "PDF Organizer",
+            "Arrange, duplicate, rotate, and export PDF pages without changing the originals.",
+        )
 
-        title = QLabel("PDF Organizer")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel("Arrange, duplicate, rotate, and export PDF pages without changing the originals.")
-        subtitle.setObjectName("SubtleText")
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add PDFs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
@@ -426,8 +369,8 @@ class PdfOrganizerPage(QWidget):
             self.delete_button,
             self.export_button,
         ]:
-            toolbar.addWidget(button)
-        toolbar.addStretch(1)
+            self.action_bar.addWidget(button)
+        self.finish_action_bar()
 
         self.add_button.clicked.connect(self._choose_pdfs)
         self.clear_button.clicked.connect(self._clear_workspace)
@@ -439,41 +382,33 @@ class PdfOrganizerPage(QWidget):
         self.delete_button.clicked.connect(self._delete_selected)
         self.export_button.clicked.connect(self._export_pdf)
 
-        self.info_label = QLabel("No pages loaded")
-        self.info_label.setObjectName("SubtleText")
+        self.info_label = self.count_label
+        self.info_label.setText("No pages loaded")
 
         self.stack = QStackedWidget()
-        self.empty_state = OrganizerDropArea()
-        self.empty_state.files_dropped.connect(self._handle_empty_add)
+        self.empty_state, empty = empty_drop_area(
+            "Add PDFs to start organizing pages",
+            "Drop one or more PDF files here.",
+            "Add PDFs",
+        )
+        self.empty_state.files_dropped.connect(self.add_dropped_files)
+        empty.action_requested.connect(self._choose_pdfs)
         self.page_grid = OrganizerPageGrid()
-        self.page_grid.files_dropped.connect(self._add_pdf_paths)
+        self.page_grid.files_dropped.connect(self.add_dropped_files)
         self.page_grid.order_changed.connect(self._on_order_changed)
         self.page_grid.delete_pressed.connect(self._delete_selected)
         self.page_grid.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.page_grid)
-        self.stack.setMinimumHeight(460)
+        self.stack.setMinimumHeight(WORK_AREA_MIN_HEIGHT)
+        self.content_layout.addWidget(self.stack, 1)
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
-
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("StatusText")
-        self.status_label.setWordWrap(True)
-        status_frame = QFrame()
-        status_frame.setObjectName("StatusBar")
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
-        status_layout.addWidget(self.status_label)
-
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(toolbar)
-        layout.addWidget(self.info_label)
-        layout.addWidget(self.stack, 1)
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(status_frame)
+        # Export stays in the toolbar; this footer only appears while an export runs.
+        self.job_footer = JobFooter(None)
+        self.progress_bar = self.job_footer.progress_bar
+        self.cancel_button = self.job_footer.cancel_button
+        self.job_footer.cancel_requested.connect(self._cancel_export)
+        self.add_job_footer(self.job_footer)
 
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self._choose_pdfs)
@@ -483,11 +418,8 @@ class PdfOrganizerPage(QWidget):
         QShortcut(QKeySequence("Ctrl+A"), self, activated=self.page_grid.selectAll)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self._export_pdf)
 
-    def _handle_empty_add(self, paths: list[str]) -> None:
-        if paths:
-            self._add_pdf_paths(paths)
-        else:
-            self._choose_pdfs()
+    def add_files(self, paths: list[str]) -> None:
+        self._add_pdf_paths(paths)
 
     def _choose_pdfs(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Select PDFs", "", "PDF files (*.pdf)")
@@ -497,7 +429,7 @@ class PdfOrganizerPage(QWidget):
     def _add_pdf_paths(self, paths: list[str]) -> None:
         pdf_paths = [Path(path) for path in paths if Path(path).suffix.lower() == ".pdf"]
         if not pdf_paths:
-            self.status_label.setText("Unsupported file type. Use PDF files.")
+            self.status_label.show_warning("Unsupported file type. Use PDF files.")
             return
 
         before = self.workspace.snapshot()
@@ -609,7 +541,7 @@ class PdfOrganizerPage(QWidget):
         self._set_matching_page_thumbnails(cache_key, pixmap)
 
     def _on_thumbnail_failed(self, page_id: str, cache_key: object) -> None:
-        pixmap = thumbnail_placeholder("Preview\nunavailable")
+        pixmap = thumbnail_placeholder("Preview\nunavailable", THUMBNAIL_SIZE)
         self.thumbnail_cache[cache_key] = pixmap
         self._set_matching_page_thumbnails(cache_key, pixmap)
         self.status_label.setText("Some page thumbnails could not be generated.")
@@ -747,8 +679,7 @@ class PdfOrganizerPage(QWidget):
             overwrite = True
 
         self._set_exporting(True)
-        self.progress_bar.setMaximum(len(self.workspace.pages))
-        self.progress_bar.setValue(0)
+        self.job_footer.set_progress(0, len(self.workspace.pages))
         self.status_label.setText(f"Exporting 0 of {len(self.workspace.pages)} pages...")
 
         thread = QThread(self)
@@ -760,29 +691,42 @@ class PdfOrganizerPage(QWidget):
         worker.progress.connect(self._on_export_progress)
         worker.finished.connect(self._on_export_finished)
         worker.failed.connect(self._on_export_failed)
+        worker.cancelled.connect(self._on_export_cancelled)
         worker.finished.connect(lambda _path: thread.quit())
         worker.failed.connect(lambda _message: thread.quit())
+        worker.cancelled.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(lambda thread=thread, worker=worker: self._clear_export_worker(thread, worker))
         thread.start()
 
+    def _cancel_export(self) -> None:
+        if self.export_worker is not None:
+            self.export_worker.cancel()
+            self.status_label.setText("Cancelling after the current page...")
+
     def _on_export_progress(self, current: int, total: int) -> None:
-        self.progress_bar.setValue(current)
+        self.job_footer.set_progress(current, total)
         self.status_label.setText(f"Exporting {current} of {total} pages...")
 
     def _on_export_finished(self, output_path: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText("Organized PDF exported successfully.")
+        self.status_label.show_success("Organized PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
             logger.warning("Could not reveal organized PDF: %s", result.message)
-            self.status_label.setText("Organized PDF exported successfully, but the output folder could not be opened.")
+            self.status_label.show_warning(
+                "Organized PDF exported successfully, but the output folder could not be opened."
+            )
+
+    def _on_export_cancelled(self) -> None:
+        self._set_exporting(False)
+        self.status_label.setText("Export cancelled.")
 
     def _on_export_failed(self, message: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText("Export failed.")
-        QMessageBox.critical(self, "Export Failed", message)
+        logger.error("PDF organizer export failed: %s", message)
+        self.status_label.show_error(EXPORT_FAILED_MESSAGE)
 
     def _clear_export_worker(self, thread: QThread, worker: OrganizerExportWorker) -> None:
         if self.export_thread is thread:
@@ -791,15 +735,14 @@ class PdfOrganizerPage(QWidget):
             self.export_worker = None
         self._update_state()
 
-    def is_exporting(self) -> bool:
-        return thread_is_running(self.export_thread)
-
     def has_background_work(self) -> bool:
-        return self.is_exporting() or thread_is_running(self.thumbnail_thread)
+        return thread_is_running(self.export_thread) or thread_is_running(self.thumbnail_thread)
 
     def stop_background_work(self) -> None:
-        """Thumbnails stop after the current page; the export cannot be cancelled and is waited for."""
+        """Thumbnails and exports both stop after the current page."""
         self._stop_thumbnail_worker()
+        if self.export_worker is not None:
+            self.export_worker.cancel()
 
     def _selected_page_ids(self) -> set[str]:
         return {item.data(PAGE_ID_ROLE) for item in self.page_grid.selectedItems()}
@@ -863,30 +806,14 @@ class PdfOrganizerPage(QWidget):
         self.delete_button.setEnabled(False if exporting else bool(self._selected_page_ids()))
         self.export_button.setVisible(not exporting)
         self.page_grid.setEnabled(not exporting)
+        self.job_footer.set_running(exporting)
 
 
 def thumbnail_from_png_bytes(data: bytes) -> QPixmap:
     pixmap = QPixmap()
     if not pixmap.loadFromData(data):
-        return thumbnail_placeholder("Preview\nunavailable")
+        return thumbnail_placeholder("Preview\nunavailable", THUMBNAIL_SIZE)
     return framed_thumbnail(pixmap)
-
-
-def thumbnail_placeholder(text: str) -> QPixmap:
-    canvas = QPixmap(THUMBNAIL_SIZE)
-    canvas.fill(QColor(CARD_BG))
-    painter = QPainter(canvas)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.fillRect(canvas.rect(), QColor(PAGE_BG))
-    page_rect = canvas.rect().adjusted(12, 10, -12, -10)
-    painter.fillRect(page_rect.adjusted(3, 3, 3, 3), QColor(*SHADOW_RGBA))
-    painter.fillRect(page_rect, QColor(CARD_BG))
-    painter.setPen(QPen(QColor(BORDER), 1))
-    painter.drawRect(page_rect)
-    painter.setPen(QColor(TEXT_SECONDARY))
-    painter.drawText(page_rect, Qt.AlignCenter, text)
-    painter.end()
-    return canvas
 
 
 def framed_thumbnail(source: QPixmap) -> QPixmap:
@@ -909,9 +836,3 @@ def framed_thumbnail(source: QPixmap) -> QPixmap:
     painter.drawRect(x, y, thumbnail.width(), thumbnail.height())
     painter.end()
     return canvas
-
-
-def set_drop_active(widget: QWidget, active: bool) -> None:
-    widget.setProperty("dropActive", active)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)

@@ -9,7 +9,6 @@ from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
-    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -19,10 +18,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -36,7 +33,8 @@ from pdf_toolbox.core.image_corrections import (
     flatten_to_white,
 )
 from pdf_toolbox.core.lru_cache import LruCache
-from pdf_toolbox.core.pdf_exporter import PdfExporter
+from pdf_toolbox.core.image_validation import SUPPORTED_EXTENSIONS
+from pdf_toolbox.core.pdf_exporter import PdfExportCancelled, PdfExporter
 from pdf_toolbox.core.pdf_geometry import (
     ExportSettings,
     MarginPreset,
@@ -45,10 +43,14 @@ from pdf_toolbox.core.pdf_geometry import (
     calculate_page_layout,
 )
 from pdf_toolbox.core.output_location import open_output_location
+from pdf_toolbox.ui.components.drop_area import empty_drop_area, local_paths, set_drop_active
+from pdf_toolbox.ui.components.page import ToolPage
+from pdf_toolbox.ui.components.settings_panel import SettingsPanel
+from pdf_toolbox.ui.components.widgets import ElidedLabel, enum_combo, labeled_control
 from pdf_toolbox.ui.threads import thread_is_running
 from pdf_toolbox.ui import icons
 from pdf_toolbox.ui.metrics import ROW_THUMBNAIL, ROW_THUMBNAIL_IMAGE, file_row_height, file_row_size_hint, order_number_width
-from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, ICON_DELETE, ICON_INLINE, MIN_TARGET, PAGE_BG, SPACE_12, SPACE_16, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, ICON_DELETE, ICON_INLINE, MIN_TARGET, PAGE_BG, SPACE_16, SPACE_4, SPACE_8, TEXT_SECONDARY
 
 
 PATH_ROLE = Qt.UserRole + 1
@@ -56,6 +58,11 @@ AUTO_ORIENTATION_LABEL = "Auto - Based on Image"
 PREVIEW_MAX_SIZE = (1100, 1100)
 PREVIEW_CACHE_ENTRIES = 10
 UNREADABLE_IMAGE_REASON = "This image could not be opened. The file may be damaged."
+EXPORT_FAILED_MESSAGE = (
+    "The PDF could not be created. Check that the images are still in their folder and that "
+    "the save location is available, then try again."
+)
+WORK_AREA_MIN_HEIGHT = 200  # list/preview areas shrink and scroll so the page fits 1366x768
 logger = logging.getLogger(__name__)
 
 
@@ -94,8 +101,7 @@ class ImageListWidget(QListWidget):
     def dropEvent(self, event) -> None:
         set_drop_active(self, False)
         if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
+            self.files_dropped.emit(local_paths(event.mimeData()))
             event.acceptProposedAction()
             return
 
@@ -108,41 +114,6 @@ class ImageListWidget(QListWidget):
 
     def paths_in_order(self) -> list[str]:
         return [self.item(index).data(PATH_ROLE) for index in range(self.count())]
-
-
-class DropAreaFrame(QFrame):
-    files_dropped = Signal(list)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("DropArea")
-        self.setAcceptDrops(True)
-
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            set_drop_active(self, True)
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event) -> None:
-        set_drop_active(self, False)
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
-            return
-        super().dropEvent(event)
-
-    def dragLeaveEvent(self, event) -> None:
-        set_drop_active(self, False)
-        super().dragLeaveEvent(event)
 
 
 class ImageRowWidget(QWidget):
@@ -198,25 +169,11 @@ class ImageRowWidget(QWidget):
         layout.addWidget(delete_button, alignment=Qt.AlignVCenter)
 
 
-class ElidedLabel(QLabel):
-    def __init__(self, text: str) -> None:
-        super().__init__()
-        self.full_text = text
-        self.setText(text)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._refresh_text()
-
-    def _refresh_text(self) -> None:
-        self.setText(self.fontMetrics().elidedText(self.full_text, Qt.ElideMiddle, max(24, self.width())))
-
-
 class PreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumSize(280, 360)
+        self.setMinimumSize(280, WORK_AREA_MIN_HEIGHT)
         self._pixmap: QPixmap | None = None
         self._image_size: tuple[int, int] | None = None
         self._settings = ExportSettings()
@@ -281,6 +238,7 @@ class PreviewWidget(QWidget):
 class ExportWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
     progress = Signal(int, int)
 
     def __init__(
@@ -296,6 +254,10 @@ class ExportWorker(QObject):
         self.settings = settings
         self.overwrite = overwrite
         self.exporter = PdfExporter()
+        self.cancel_requested = False
+
+    def cancel(self) -> None:
+        self.cancel_requested = True
 
     def run(self) -> None:
         try:
@@ -305,7 +267,11 @@ class ExportWorker(QObject):
                 settings=self.settings,
                 overwrite=self.overwrite,
                 progress_callback=self.progress.emit,
+                cancel_callback=lambda: self.cancel_requested,
             )
+        except PdfExportCancelled:
+            self.cancelled.emit()
+            return
         except Exception as exc:
             logger.exception("Image to PDF export failed")
             self.failed.emit(str(exc))
@@ -314,7 +280,10 @@ class ExportWorker(QObject):
         self.finished.emit(str(result))
 
 
-class ImageToPdfPage(QWidget):
+class ImageToPdfPage(ToolPage):
+    ACCEPTED_EXTENSIONS = frozenset(SUPPORTED_EXTENSIONS)
+    ACCEPTED_DESCRIPTION = "JPG, JPEG or PNG images"
+
     def __init__(self) -> None:
         super().__init__()
         self.collection = ImageCollection()
@@ -335,40 +304,34 @@ class ImageToPdfPage(QWidget):
         self._update_preview()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
-        layout.setSpacing(SPACE_12)
+        self.build_scaffold("Image → PDF", "Import images, arrange their order, and export them as one PDF.")
 
-        title = QLabel("Image → PDF")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel("Import images, arrange their order, and export them as one PDF.")
-        subtitle.setObjectName("SubtleText")
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add Images")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
         self.add_button.clicked.connect(self._choose_images)
         self.clear_button.clicked.connect(self._clear_images)
-        toolbar.addWidget(self.add_button)
-        toolbar.addWidget(self.clear_button)
-        toolbar.addStretch(1)
-
-        self.content_layout = QHBoxLayout()
-        self.content_layout.setSpacing(SPACE_16)
+        self.action_bar.addWidget(self.add_button)
+        self.action_bar.addWidget(self.clear_button)
+        self.finish_action_bar()
 
         self.list_heading = QLabel("Imported Images")
         self.list_heading.setObjectName("PanelHeading")
         self.stack = QStackedWidget()
-        self.empty_state = self._build_empty_state()
+        self.empty_state, empty = empty_drop_area(
+            "Add images to create a PDF",
+            "Drag and drop JPG, JPEG, or PNG files here.",
+            "Add Images",
+        )
+        self.empty_state.files_dropped.connect(self.add_dropped_files)
+        empty.action_requested.connect(self._choose_images)
         self.image_list = ImageListWidget()
-        self.image_list.files_dropped.connect(self._add_images)
+        self.image_list.files_dropped.connect(self.add_dropped_files)
         self.image_list.order_changed.connect(self._sync_order_from_list)
         self.image_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.image_list)
-        self.stack.setMinimumSize(330, 360)
+        self.stack.setMinimumSize(330, WORK_AREA_MIN_HEIGHT)
 
         self.preview = PreviewWidget()
 
@@ -393,52 +356,21 @@ class ImageToPdfPage(QWidget):
         self.content_layout.addWidget(self.preview_section, 4)
         self.content_layout.addWidget(self.settings_panel, 3)
 
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("StatusText")
-        self.status_label.setWordWrap(True)
-        status_frame = QFrame()
-        status_frame.setObjectName("StatusBar")
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
-        status_layout.addWidget(self.status_label)
+    def _build_settings_panel(self) -> SettingsPanel:
+        panel = SettingsPanel("Settings", "Export PDF", min_width=310, max_width=390)
+        layout = panel.body_layout
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(toolbar)
-        layout.addLayout(self.content_layout, 1)
-        layout.addWidget(status_frame)
-
-    def _build_settings_panel(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setObjectName("SettingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(310)
-        scroll.setMaximumWidth(390)
-
-        panel = QFrame()
-        panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(300)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
-        layout.setSpacing(SPACE_12)
-
-        heading = QLabel("Settings")
-        heading.setObjectName("PanelHeading")
-        layout.addWidget(heading)
-
-        self.page_size_combo = self._combo(PageSizeMode)
+        self.page_size_combo = enum_combo(PageSizeMode, min_contents_length=24)
         self.page_size_combo.currentIndexChanged.connect(self._on_export_settings_changed)
-        layout.addLayout(self._labeled_control("Page Size", self.page_size_combo))
+        layout.addLayout(labeled_control("Page Size", self.page_size_combo))
 
-        self.orientation_combo = self._combo(PageOrientation)
+        self.orientation_combo = enum_combo(PageOrientation, min_contents_length=24)
         self.orientation_combo.currentIndexChanged.connect(self._on_export_settings_changed)
-        layout.addLayout(self._labeled_control("Orientation", self.orientation_combo))
+        layout.addLayout(labeled_control("Orientation", self.orientation_combo))
 
-        self.margin_combo = self._combo(MarginPreset)
+        self.margin_combo = enum_combo(MarginPreset, min_contents_length=24)
         self.margin_combo.currentIndexChanged.connect(self._on_export_settings_changed)
-        layout.addLayout(self._labeled_control("Margin", self.margin_combo))
+        layout.addLayout(labeled_control("Margin", self.margin_combo))
 
         self.corrections_toggle = QPushButton("Corrections")
         self.corrections_toggle.setCheckable(True)
@@ -452,15 +384,15 @@ class ImageToPdfPage(QWidget):
         self.corrections_panel = self._build_corrections_panel()
         self.corrections_panel.setVisible(False)
         layout.addWidget(self.corrections_panel)
-        layout.addStretch(1)
+        panel.finish_body()
 
-        self.export_button = QPushButton("Export PDF")
-        self.export_button.setObjectName("PrimaryButton")
+        self.job_footer = panel.footer
+        self.export_button = panel.footer.primary_button
         self.export_button.clicked.connect(self._export_pdf)
-        layout.addWidget(self.export_button)
-
-        scroll.setWidget(panel)
-        return scroll
+        self.progress_bar = panel.footer.progress_bar
+        self.cancel_button = panel.footer.cancel_button
+        panel.footer.cancel_requested.connect(self._cancel_export)
+        return panel
 
     def _build_corrections_panel(self) -> QFrame:
         panel = QFrame()
@@ -514,57 +446,13 @@ class ImageToPdfPage(QWidget):
         layout.addLayout(grid)
         return section
 
-    def _combo(self, enum_type) -> QComboBox:
-        combo = QComboBox()
-        combo.setMinimumHeight(CONTROL_HEIGHT)
-        combo.setMinimumWidth(260)
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(24)
-        for item in enum_type:
-            combo.addItem(item.value, item.value)
-        # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
-        combo.setItemDelegate(QStyledItemDelegate(combo))
-        combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(300)
-        return combo
-
-    def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(SPACE_4)
-        text = QLabel(label)
-        text.setObjectName("FieldLabel")
-        layout.addWidget(text)
-        layout.addWidget(control)
-        return layout
-
-    def _build_empty_state(self) -> QWidget:
-        frame = DropAreaFrame()
-        frame.files_dropped.connect(self._add_images)
-        layout = QVBoxLayout(frame)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(SPACE_8)
-
-        title = QLabel("Add images to create a PDF")
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("DropTitle")
-        hint = QLabel("Drag and drop JPG, JPEG, or PNG files here.")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setObjectName("SubtleText")
-        button = QPushButton("Add Images")
-        button.setObjectName("PrimaryButton")
-        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        button.clicked.connect(self._choose_images)
-
-        layout.addWidget(title)
-        layout.addWidget(hint)
-        layout.addWidget(button, alignment=Qt.AlignCenter)
-        return frame
-
     def _choose_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.jpeg *.png)")
         if files:
             self._add_images(files)
+
+    def add_files(self, paths: list[str]) -> None:
+        self._add_images(paths)
 
     def _add_images(self, paths: list[str]) -> None:
         had_selection = bool(self.image_list.selectedItems())
@@ -716,6 +604,7 @@ class ImageToPdfPage(QWidget):
             overwrite = True
 
         self._set_exporting(True)
+        self.job_footer.set_progress(0, len(self.collection.entries))
         self.status_label.setText("Exporting PDF...")
         self.export_thread = QThread(self)
         self.export_worker = ExportWorker(self.collection.entries, output_path, self._export_settings(), overwrite)
@@ -724,37 +613,48 @@ class ImageToPdfPage(QWidget):
         self.export_worker.progress.connect(self._on_export_progress)
         self.export_worker.finished.connect(self._on_export_finished)
         self.export_worker.failed.connect(self._on_export_failed)
+        self.export_worker.cancelled.connect(self._on_export_cancelled)
         self.export_worker.finished.connect(self.export_thread.quit)
         self.export_worker.failed.connect(self.export_thread.quit)
+        self.export_worker.cancelled.connect(self.export_thread.quit)
         self.export_thread.finished.connect(self.export_worker.deleteLater)
         self.export_thread.finished.connect(self.export_thread.deleteLater)
         self.export_thread.finished.connect(self._clear_export_worker)
         self.export_thread.start()
 
-    def is_exporting(self) -> bool:
+    def has_background_work(self) -> bool:
         return thread_is_running(self.export_thread)
 
-    def has_background_work(self) -> bool:
-        return self.is_exporting()
-
     def stop_background_work(self) -> None:
-        """PDF export cannot be cancelled; the window waits for it instead."""
+        """Ask a running export to stop before its next image."""
+        if self.export_worker is not None:
+            self.export_worker.cancel()
+
+    def _cancel_export(self) -> None:
+        if self.export_worker is not None:
+            self.export_worker.cancel()
+            self.status_label.setText("Cancelling after the current image...")
 
     def _on_export_progress(self, current: int, total: int) -> None:
+        self.job_footer.set_progress(current, total)
         self.status_label.setText(f"Exporting PDF... {current}/{total}")
 
     def _on_export_finished(self, output_path: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText("PDF exported successfully.")
+        self.status_label.show_success("PDF exported successfully.")
         result = self.open_output_location(output_path, reveal=True)
         if not result.success:
             logger.warning("Could not reveal exported PDF: %s", result.message)
-            self.status_label.setText("PDF exported successfully, but the output folder could not be opened.")
+            self.status_label.show_warning("PDF exported successfully, but the output folder could not be opened.")
+
+    def _on_export_cancelled(self) -> None:
+        self._set_exporting(False)
+        self.status_label.setText("Export cancelled.")
 
     def _on_export_failed(self, message: str) -> None:
         self._set_exporting(False)
-        self.status_label.setText("Export failed.")
-        QMessageBox.critical(self, "Export Failed", message)
+        logger.error("Image to PDF export failed: %s", message)
+        self.status_label.show_error(EXPORT_FAILED_MESSAGE)
 
     def _clear_export_worker(self) -> None:
         self.export_thread = None
@@ -769,6 +669,7 @@ class ImageToPdfPage(QWidget):
         self.export_button.setEnabled(not exporting and has_images)
         self.image_list.setEnabled(not exporting)
         self._set_correction_controls_enabled(not exporting and has_selection)
+        self.job_footer.set_running(exporting)
 
     def _update_state(self) -> None:
         has_images = len(self.collection) > 0
@@ -780,6 +681,10 @@ class ImageToPdfPage(QWidget):
         self.export_button.setEnabled(not exporting and has_images)
         self._set_correction_controls_enabled(not exporting and has_selection)
         self._sync_orientation_control()
+        count = len(self.collection)
+        self.count_label.setText(
+            "No images loaded" if count == 0 else "1 image loaded" if count == 1 else f"{count} images loaded"
+        )
 
         if not has_selection:
             self.selection_label.setText("Select an image")
@@ -804,7 +709,10 @@ class ImageToPdfPage(QWidget):
         if result.rejected:
             messages.append(f"Rejected {len(result.rejected)} unsupported or invalid file(s).")
         if messages:
-            self.status_label.setText(" ".join(messages))
+            if result.rejected or result.duplicates:
+                self.status_label.show_warning(" ".join(messages))
+            else:
+                self.status_label.setText(" ".join(messages))
         if result.rejected:
             details = "\n".join(f"{item.path.name}: {item.reason}" for item in result.rejected[:8])
             if len(result.rejected) > 8:
@@ -876,7 +784,7 @@ class ImageToPdfPage(QWidget):
             logger.warning("Preview could not be generated for %s", entry.path, exc_info=True)
             message = f"{entry.filename}: {UNREADABLE_IMAGE_REASON}"
             self.preview.set_preview(None, None, self._export_settings(), message)
-            self.status_label.setText(message)
+            self.status_label.show_warning(message)
             return
         self.preview.set_preview(pixmap, size, self._export_settings())
 
@@ -977,9 +885,3 @@ class ImageToPdfPage(QWidget):
             if str(entry.path) == target:
                 return entry
         return None
-
-
-def set_drop_active(widget: QWidget, active: bool) -> None:
-    widget.setProperty("dropActive", active)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)

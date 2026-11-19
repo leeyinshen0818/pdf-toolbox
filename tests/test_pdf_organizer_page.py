@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication, QLabel
 from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.pdf_to_image import PdfInfo
 from pdf_toolbox.core.pdf_organizer import pdf_key
-from pdf_toolbox.ui.pdf_organizer_page import PAGE_ID_ROLE, PdfOrganizerPage, thumbnail_placeholder
+from pdf_toolbox.ui.components.widgets import thumbnail_placeholder
+from pdf_toolbox.ui.pdf_organizer_page import PAGE_ID_ROLE, THUMBNAIL_SIZE, PdfOrganizerPage
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +121,7 @@ def test_thumbnail_requests_skip_cached_duplicate_pages(app: QApplication, tmp_p
     source = fake_info(tmp_path / "source.pdf", 1)
     page.workspace.add_pdf(source)
     original = page.workspace.pages[0]
-    page.thumbnail_cache[original.thumbnail_key] = thumbnail_placeholder("Cached")
+    page.thumbnail_cache[original.thumbnail_key] = thumbnail_placeholder("Cached", THUMBNAIL_SIZE)
     page.workspace.duplicate_pages({original.page_id})
 
     assert page._selected_page_ids() == set()

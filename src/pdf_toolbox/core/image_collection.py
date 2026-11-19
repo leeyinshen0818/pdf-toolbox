@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
 from pdf_toolbox.core.image_corrections import CorrectionSettings
 from pdf_toolbox.core.image_validation import ImageInfo, ImageValidationError, validate_image_file
+from pdf_toolbox.core.path_keys import path_key as image_key
 
 
 @dataclass(frozen=True)
@@ -40,10 +40,6 @@ class AddImagesResult:
     added: tuple[ImageEntry, ...]
     rejected: tuple[RejectedImage, ...]
     duplicates: tuple[Path, ...]
-
-
-def image_key(path: str | Path) -> str:
-    return os.path.normcase(str(Path(path).resolve(strict=False)))
 
 
 class ImageCollection:

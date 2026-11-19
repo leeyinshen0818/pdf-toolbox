@@ -13,7 +13,15 @@ class PdfOrganizerExportError(Exception):
     """Raised when the organizer cannot export the arranged PDF."""
 
 
+class PdfOrganizerExportCancelled(Exception):
+    """Raised when the user cancels an export; no output is written and any existing target is untouched."""
+
+    def __init__(self) -> None:
+        super().__init__("Export cancelled.")
+
+
 ProgressCallback = Callable[[int, int], None]
+CancelCallback = Callable[[], bool]
 
 
 class PdfOrganizerExporter:
@@ -24,6 +32,7 @@ class PdfOrganizerExporter:
         *,
         overwrite: bool = False,
         progress_callback: ProgressCallback | None = None,
+        cancel_callback: CancelCallback | None = None,
     ) -> Path:
         if not pages:
             raise PdfOrganizerExportError("No pages to export.")
@@ -46,6 +55,8 @@ class PdfOrganizerExporter:
         temp_path: Path | None = None
         try:
             for done, page in enumerate(pages, start=1):
+                if cancel_callback is not None and cancel_callback():
+                    raise PdfOrganizerExportCancelled()
                 source_path = Path(page.source_path)
                 if not source_path.exists():
                     raise PdfOrganizerExportError(f"The source file could not be found: {source_path.name}")
@@ -71,6 +82,8 @@ class PdfOrganizerExporter:
                 if progress_callback is not None:
                     progress_callback(done, len(pages))
 
+            if cancel_callback is not None and cancel_callback():
+                raise PdfOrganizerExportCancelled()
             with tempfile.NamedTemporaryFile(suffix=".pdf", dir=target.parent, delete=False) as temp_file:
                 temp_path = Path(temp_file.name)
             output.save(temp_path)

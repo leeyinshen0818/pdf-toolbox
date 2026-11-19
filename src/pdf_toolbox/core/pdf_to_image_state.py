@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from pdf_toolbox.core.pdf_to_image import DpiPreset, JpgQuality, OutputFormat, PdfInfo, PdfPageRef
+from pdf_toolbox.core.path_keys import path_key as pdf_key
 
 
 @dataclass(frozen=True)
@@ -81,5 +81,3 @@ class PdfToImageState:
         return (self.loaded_pdfs[0].source_key, 0)
 
 
-def pdf_key(path: str | Path) -> str:
-    return os.path.normcase(str(Path(path).resolve(strict=False)))

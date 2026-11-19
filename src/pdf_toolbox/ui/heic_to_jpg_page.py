@@ -4,24 +4,19 @@ import logging
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import QObject, QSettings, QStandardPaths, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSettings, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -34,14 +29,19 @@ from pdf_toolbox.core.heic_to_jpg import (
     HeicJpgSettings,
     HeicToJpgService,
     RejectedHeic,
+    SUPPORTED_HEIC_EXTENSIONS,
 )
 from pdf_toolbox.core.lru_cache import LruCache
 from pdf_toolbox.core.output_location import open_output_location
 from pdf_toolbox.core.pdf_to_image import JpgQuality
+from pdf_toolbox.ui.components.drop_area import empty_drop_area, local_paths, set_drop_active
+from pdf_toolbox.ui.components.page import ToolPage
+from pdf_toolbox.ui.components.settings_panel import SettingsPanel
+from pdf_toolbox.ui.components.widgets import default_output_folder, enum_combo, labeled_control
 from pdf_toolbox.ui.threads import thread_is_running
 from pdf_toolbox.ui import icons
 from pdf_toolbox.ui.metrics import ROW_THUMBNAIL, ROW_THUMBNAIL_IMAGE, file_row_size_hint
-from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, ICON_DELETE, MIN_TARGET, PAGE_BG, SPACE_12, SPACE_16, SPACE_24, SPACE_32, SPACE_4, SPACE_8, TEXT_SECONDARY
+from pdf_toolbox.ui.tokens import BORDER, CARD_BG, ICON_DELETE, MIN_TARGET, PAGE_BG, SPACE_16, SPACE_4, SPACE_8, TEXT_SECONDARY
 
 
 HEIC_PATH_ROLE = Qt.UserRole + 40
@@ -52,60 +52,12 @@ HEIC_PREVIEW_CACHE_ENTRIES = 10
 # evicted thumbnail would cost a full decode on the next list rebuild.
 HEIC_THUMBNAIL_CACHE_ENTRIES = 500
 UNDECODABLE_HEIC_REASON = "This HEIC image could not be opened. The file may be damaged."
+CONVERSION_FAILED_MESSAGE = (
+    "The photos could not be converted. Check that the files are still in their folder and that "
+    "the output folder is available, then try again."
+)
+WORK_AREA_MIN_HEIGHT = 200  # list/preview areas shrink and scroll so the page fits 1366x768
 logger = logging.getLogger(__name__)
-
-
-class HeicDropArea(QFrame):
-    files_dropped = Signal(list)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("DropArea")
-        self.setAcceptDrops(True)
-
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(SPACE_8)
-
-        title = QLabel("Add HEIC files to convert into JPG")
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("DropTitle")
-        hint = QLabel("Drag and drop HEIC or HEIF files here.")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setObjectName("SubtleText")
-        button = QPushButton("Add HEICs")
-        button.setObjectName("PrimaryButton")
-        button.clicked.connect(lambda: self.files_dropped.emit([]))
-
-        layout.addWidget(title)
-        layout.addWidget(hint)
-        layout.addWidget(button, alignment=Qt.AlignCenter)
-
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            set_drop_active(self, True)
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event) -> None:
-        set_drop_active(self, False)
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
-            return
-        super().dropEvent(event)
-
-    def dragLeaveEvent(self, event) -> None:
-        set_drop_active(self, False)
-        super().dragLeaveEvent(event)
 
 
 class HeicListWidget(QListWidget):
@@ -135,8 +87,7 @@ class HeicListWidget(QListWidget):
     def dropEvent(self, event) -> None:
         set_drop_active(self, False)
         if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            self.files_dropped.emit(paths)
+            self.files_dropped.emit(local_paths(event.mimeData()))
             event.acceptProposedAction()
             return
         super().dropEvent(event)
@@ -192,7 +143,7 @@ class HeicPreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
-        self.setMinimumSize(280, 360)
+        self.setMinimumSize(280, WORK_AREA_MIN_HEIGHT)
         self._pixmap: QPixmap | None = None
         self._empty_text = "Add HEIC files to begin"
 
@@ -260,7 +211,10 @@ class HeicConversionWorker(QObject):
         self.progress.emit(current, total, str(source), str(target))
 
 
-class HeicToJpgPage(QWidget):
+class HeicToJpgPage(ToolPage):
+    ACCEPTED_EXTENSIONS = frozenset(SUPPORTED_HEIC_EXTENSIONS)
+    ACCEPTED_DESCRIPTION = "HEIC or HEIF photos"
+
     def __init__(self) -> None:
         super().__init__()
         self.service = HeicToJpgService()
@@ -278,45 +232,37 @@ class HeicToJpgPage(QWidget):
         self._update_preview()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACE_32, SPACE_24, SPACE_32, SPACE_24)
-        layout.setSpacing(SPACE_12)
+        self.build_scaffold("HEIC \u2192 JPG", "Convert HEIC and HEIF photos into high-quality JPG images.")
 
-        title = QLabel("HEIC → JPG")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel("Convert HEIC and HEIF photos into high-quality JPG images.")
-        subtitle.setObjectName("SubtleText")
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(SPACE_8)
         self.add_button = QPushButton("Add HEICs")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
         self.add_button.clicked.connect(self._choose_heics)
         self.clear_button.clicked.connect(self._clear_files)
-        toolbar.addWidget(self.add_button)
-        toolbar.addWidget(self.clear_button)
-        toolbar.addStretch(1)
+        self.action_bar.addWidget(self.add_button)
+        self.action_bar.addWidget(self.clear_button)
+        self.finish_action_bar()
 
-        self.content_layout = QHBoxLayout()
-        self.content_layout.setSpacing(SPACE_16)
+        self.info_label = self.count_label
 
         self.list_section = QWidget()
         list_layout = QVBoxLayout(self.list_section)
         list_layout.setContentsMargins(0, 0, 0, 0)
         list_layout.setSpacing(SPACE_8)
-        self.info_label = QLabel("No HEIC files loaded")
-        self.info_label.setObjectName("SubtleText")
         self.stack = QStackedWidget()
-        self.empty_state = HeicDropArea()
-        self.empty_state.files_dropped.connect(self._handle_empty_add)
+        self.empty_state, empty = empty_drop_area(
+            "Add HEIC files to convert into JPG",
+            "Drag and drop HEIC or HEIF files here.",
+            "Add HEICs",
+        )
+        self.empty_state.files_dropped.connect(self.add_dropped_files)
+        empty.action_requested.connect(self._choose_heics)
         self.file_list = HeicListWidget()
-        self.file_list.files_dropped.connect(self._add_heic_paths)
+        self.file_list.files_dropped.connect(self.add_dropped_files)
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.stack.addWidget(self.empty_state)
         self.stack.addWidget(self.file_list)
-        self.stack.setMinimumSize(330, 360)
-        list_layout.addWidget(self.info_label)
+        self.stack.setMinimumSize(330, WORK_AREA_MIN_HEIGHT)
         list_layout.addWidget(self.stack, 1)
 
         self.preview_section = QWidget()
@@ -334,49 +280,19 @@ class HeicToJpgPage(QWidget):
         self.content_layout.addWidget(self.preview_section, 4)
         self.content_layout.addWidget(self.settings_panel, 3)
 
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("StatusText")
-        self.status_label.setWordWrap(True)
-        status_frame = QFrame()
-        status_frame.setObjectName("StatusBar")
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(SPACE_8, SPACE_8, SPACE_8, SPACE_8)
-        status_layout.addWidget(self.status_label)
+    def _build_settings_panel(self) -> SettingsPanel:
+        panel = SettingsPanel("Conversion Settings", "Convert", min_width=310, max_width=390)
+        layout = panel.body_layout
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(toolbar)
-        layout.addLayout(self.content_layout, 1)
-        layout.addWidget(status_frame)
-
-    def _build_settings_panel(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setObjectName("SettingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setMinimumWidth(310)
-        scroll.setMaximumWidth(390)
-
-        panel = QFrame()
-        panel.setObjectName("SettingsPanel")
-        panel.setMinimumWidth(300)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(SPACE_16, SPACE_16, SPACE_16, SPACE_16)
-        layout.setSpacing(SPACE_12)
-
-        heading = QLabel("Conversion Settings")
-        heading.setObjectName("PanelHeading")
-        layout.addWidget(heading)
-
-        self.jpg_quality_combo = self._combo(JpgQuality)
+        self.jpg_quality_combo = enum_combo(JpgQuality)
         self.jpg_quality_combo.setCurrentIndex(self.jpg_quality_combo.findData(JpgQuality.MAXIMUM.value))
-        layout.addLayout(self._labeled_control("JPG Quality", self.jpg_quality_combo))
+        layout.addLayout(labeled_control("JPG Quality", self.jpg_quality_combo))
 
         output_label = QLabel("Output Folder")
         output_label.setObjectName("FieldLabel")
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
+        self.output_folder_edit.setAcceptDrops(False)  # let file drops reach the window
         self.output_folder_edit.setPlaceholderText("Choose a folder")
         self.output_folder_edit.setMinimumWidth(120)
         self.output_folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -393,55 +309,23 @@ class HeicToJpgPage(QWidget):
         layout.addWidget(output_label)
         layout.addLayout(output_row)
         layout.addWidget(self.set_default_folder_button)
-        layout.addStretch(1)
+        panel.finish_body()
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
-        layout.addWidget(self.progress_bar)
-        self.convert_button = QPushButton("Convert")
-        self.convert_button.setObjectName("PrimaryButton")
+        self.job_footer = panel.footer
+        self.convert_button = panel.footer.primary_button
         self.convert_button.clicked.connect(self._start_conversion)
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self._cancel_conversion)
-        layout.addWidget(self.convert_button)
-        layout.addWidget(self.cancel_button)
-
-        scroll.setWidget(panel)
-        return scroll
-
-    def _combo(self, enum_type) -> QComboBox:
-        combo = QComboBox()
-        combo.setMinimumHeight(CONTROL_HEIGHT)
-        combo.setMinimumWidth(260)
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        for item in enum_type:
-            combo.addItem(item.value, item.value)
-        # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
-        combo.setItemDelegate(QStyledItemDelegate(combo))
-        combo.view().setObjectName("ComboPopup")
-        combo.view().setMinimumWidth(300)
-        return combo
-
-    def _labeled_control(self, label: str, control: QWidget) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(SPACE_4)
-        text = QLabel(label)
-        text.setObjectName("FieldLabel")
-        layout.addWidget(text)
-        layout.addWidget(control)
-        return layout
+        self.progress_bar = panel.footer.progress_bar
+        self.cancel_button = panel.footer.cancel_button
+        panel.footer.cancel_requested.connect(self._cancel_conversion)
+        return panel
 
     def _choose_heics(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Select HEIC Files", "", "HEIC files (*.heic *.heif)")
         if files:
             self._add_heic_paths(files)
 
-    def _handle_empty_add(self, paths: list[str]) -> None:
-        if paths:
-            self._add_heic_paths(paths)
-        else:
-            self._choose_heics()
+    def add_files(self, paths: list[str]) -> None:
+        self._add_heic_paths(paths)
 
     def _add_heic_paths(self, paths: list[str]) -> None:
         had_selection = bool(self.file_list.selectedItems())
@@ -525,7 +409,10 @@ class HeicToJpgPage(QWidget):
             messages.append(f"Skipped {len(result.duplicates)} duplicate file(s).")
         if result.rejected:
             messages.append(f"Rejected {len(result.rejected)} unsupported or invalid file(s).")
-        self.status_label.setText(" ".join(messages) if messages else "No HEIC files added.")
+        if result.rejected or result.duplicates:
+            self.status_label.show_warning(" ".join(messages))
+        else:
+            self.status_label.setText(" ".join(messages) if messages else "No HEIC files added.")
         if result.rejected:
             details = "\n".join(f"{item.path.name}: {item.reason}" for item in result.rejected[:8])
             QMessageBox.warning(self, "Some Files Were Not Added", details)
@@ -547,7 +434,6 @@ class HeicToJpgPage(QWidget):
         self.file_list.clear()
         self.thumbnail_cache.clear()
         self.preview_cache.clear()
-        self.progress_bar.setValue(0)
         self.status_label.setText("HEIC list cleared.")
         self._update_info()
         self._update_state()
@@ -571,7 +457,7 @@ class HeicToJpgPage(QWidget):
             self.status_label.setText("Choose an output folder before saving a default.")
             return
         QSettings().setValue(HEIC_OUTPUT_FOLDER_SETTING, str(self.output_folder))
-        self.status_label.setText("Default output folder saved.")
+        self.status_label.show_success("Default output folder saved.")
 
     def _load_output_folder_setting(self) -> None:
         saved = QSettings().value(HEIC_OUTPUT_FOLDER_SETTING, "", str)
@@ -584,10 +470,9 @@ class HeicToJpgPage(QWidget):
         if not self.collection.entries or self.output_folder is None or self.conversion_thread is not None:
             return
         settings = HeicJpgSettings(jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()))
-        self.progress_bar.setMaximum(len(self.collection.entries))
-        self.progress_bar.setValue(0)
-        self.status_label.setText(f"Converting 0 of {len(self.collection.entries)} images...")
         self._set_converting(True)
+        self.job_footer.set_progress(0, len(self.collection.entries))
+        self.status_label.setText(f"Converting 0 of {len(self.collection.entries)} images...")
 
         thread = QThread(self)
         worker = HeicConversionWorker(self.collection.entries, self.output_folder, settings)
@@ -607,10 +492,6 @@ class HeicToJpgPage(QWidget):
         thread.finished.connect(lambda thread=thread, worker=worker: self._clear_conversion_worker(thread, worker))
         thread.start()
 
-    def is_exporting(self) -> bool:
-        """Conversions are cancellable, so they never block closing behind a confirmation."""
-        return False
-
     def has_background_work(self) -> bool:
         return thread_is_running(self.conversion_thread)
 
@@ -623,21 +504,20 @@ class HeicToJpgPage(QWidget):
         if self.conversion_worker is not None:
             self.conversion_worker.cancel()
             self.status_label.setText("Cancelling after the current image...")
-            self.cancel_button.setEnabled(False)
 
     def _on_conversion_progress(self, current: int, total: int, source: str, target: str) -> None:
-        self.progress_bar.setValue(current)
+        self.job_footer.set_progress(current, total)
         self.status_label.setText(f"Converting {current} of {total} images...")
 
     def _on_conversion_finished(self, paths: object) -> None:
         completed = tuple(paths)
         self._set_converting(False)
-        self.status_label.setText(f"Conversion complete - {len(completed)} JPG image(s) saved.")
+        self.status_label.show_success(f"Conversion complete - {len(completed)} JPG image(s) saved.")
         if completed and self.output_folder is not None:
             result = self.open_output_location(self.output_folder)
             if not result.success:
                 logger.warning("Could not open HEIC output folder: %s", result.message)
-                self.status_label.setText("Conversion complete, but the output folder could not be opened.")
+                self.status_label.show_warning("Conversion complete, but the output folder could not be opened.")
 
     def _on_conversion_cancelled(self, paths: object) -> None:
         completed = tuple(paths)
@@ -646,8 +526,8 @@ class HeicToJpgPage(QWidget):
 
     def _on_conversion_failed(self, message: str) -> None:
         self._set_converting(False)
-        self.status_label.setText(message)
-        QMessageBox.critical(self, "Conversion Failed", message)
+        logger.error("HEIC to JPG conversion failed: %s", message)
+        self.status_label.show_error(CONVERSION_FAILED_MESSAGE)
 
     def _clear_conversion_worker(self, thread: QThread, worker: HeicConversionWorker) -> None:
         if self.conversion_thread is thread:
@@ -673,7 +553,7 @@ class HeicToJpgPage(QWidget):
         if pixmap is None:
             message = f"{entry.filename}: {UNDECODABLE_HEIC_REASON}"
             self.preview.set_preview(None, message)
-            self.status_label.setText(message)
+            self.status_label.show_warning(message)
             return
         self.preview.set_preview(pixmap)
 
@@ -693,9 +573,7 @@ class HeicToJpgPage(QWidget):
         self.add_button.setEnabled(not converting)
         self.clear_button.setEnabled(has_files and not converting)
         self.convert_button.setEnabled(has_files and self.output_folder is not None and not converting)
-        self.convert_button.setVisible(not converting)
-        self.cancel_button.setVisible(converting)
-        self.cancel_button.setEnabled(converting)
+        self.job_footer.set_running(converting)
         self.file_list.setEnabled(not converting)
         self.jpg_quality_combo.setEnabled(not converting)
         self.output_folder_edit.setEnabled(not converting)
@@ -707,9 +585,7 @@ class HeicToJpgPage(QWidget):
     def _set_converting(self, converting: bool) -> None:
         self.add_button.setEnabled(not converting)
         self.clear_button.setEnabled(not converting and bool(self.collection.entries))
-        self.convert_button.setVisible(not converting)
-        self.cancel_button.setVisible(converting)
-        self.cancel_button.setEnabled(converting)
+        self.job_footer.set_running(converting)
         self.file_list.setEnabled(not converting)
         self.jpg_quality_combo.setEnabled(not converting)
         self.output_folder_edit.setEnabled(not converting)
@@ -755,15 +631,6 @@ class HeicToJpgPage(QWidget):
             return (str(path), 0)
 
 
-def default_output_folder() -> Path:
-    pictures = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
-    if pictures:
-        path = Path(pictures)
-        if path.exists():
-            return path
-    return Path.home()
-
-
 def pil_rgb_to_qimage(image: Image.Image) -> QImage:
     rgb = image if image.mode == "RGB" else image.convert("RGB")
     data = rgb.tobytes("raw", "RGB")
@@ -777,9 +644,3 @@ def pixmap_from_png_bytes(data: bytes) -> QPixmap:
     fallback = QPixmap(ROW_THUMBNAIL_IMAGE, ROW_THUMBNAIL_IMAGE)
     fallback.fill(QColor(CARD_BG))
     return fallback
-
-
-def set_drop_active(widget: QWidget, active: bool) -> None:
-    widget.setProperty("dropActive", active)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
