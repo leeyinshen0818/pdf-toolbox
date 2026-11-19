@@ -60,7 +60,7 @@ python -m pip install -c constraints.txt -e .[build]
 `build.ps1` stops if the installed packages differ from `constraints.txt`. It builds one single-file app that can be copied to your Desktop or sent to another Windows PC:
 
 ```text
-release/PDF-Toolbox-2.0.0.exe
+release/PDF-Toolbox-2.0.1.exe
 ```
 
 The app icon is generated from `icon/pdf_icon.png` with `python packaging_support/make_icon.py`.

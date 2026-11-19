@@ -13,6 +13,7 @@ from pdf_toolbox.core.heic_to_jpg import register_heic_support
 from pdf_toolbox.logging_config import configure_logging
 from pdf_toolbox.resources import app_icon_path
 from pdf_toolbox.ui.main_window import MainWindow
+from pdf_toolbox.ui.screen_scale import apply_ui_scale
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ def _show_startup_error(message: str) -> None:
 def main() -> int:
     log_path = configure_logging()
     try:
+        # Screen-relative UI scale via QT_SCALE_FACTOR; must run before QApplication exists.
+        apply_ui_scale()
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
         )
