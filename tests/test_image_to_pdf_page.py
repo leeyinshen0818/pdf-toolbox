@@ -8,13 +8,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 import pymupdf
 from PIL import Image
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QLabel, QMessageBox, QPushButton
 
 from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.image_corrections import CorrectionSettings, SharpnessPreset, TonePreset
 from pdf_toolbox.core.pdf_exporter import PdfExporter
 from pdf_toolbox.core.pdf_geometry import A4_PORTRAIT, LETTER_PORTRAIT, MarginPreset, PageOrientation, PageSizeMode
-from pdf_toolbox.ui.image_to_pdf_page import AUTO_ORIENTATION_LABEL, ImageToPdfPage
+from pdf_toolbox.ui.image_to_pdf_page import AUTO_ORIENTATION_LABEL, PATH_ROLE, ImageToPdfPage
 
 
 @pytest.fixture(scope="module")
@@ -410,3 +412,43 @@ def test_corrupt_or_truncated_images_report_a_per_file_error(
             app.processEvents()
             messages.append(page.status_label.text())
         assert any(damaged.name in message for message in messages), damaged.name
+
+
+def test_apply_to_all_images_copies_the_selected_images_corrections(app: QApplication, tmp_path: Path) -> None:
+    paths = [make_image(tmp_path / f"image_{index}.png") for index in range(3)]
+    page = ImageToPdfPage()
+    page._add_images([str(path) for path in paths])
+    page._select_path(paths[1])
+    page._set_sharpness(SharpnessPreset.SHARPER)
+    page._set_tone(TonePreset.BRIGHT_CONTRAST)
+    chosen = CorrectionSettings(SharpnessPreset.SHARPER, TonePreset.BRIGHT_CONTRAST)
+
+    page.apply_all_button.click()
+
+    assert [entry.corrections for entry in page.collection.entries] == [chosen] * 3
+    assert "all 3 images" in page.status_label.text()
+
+
+def test_alt_up_and_down_move_the_selected_image_and_keep_it_selected(app: QApplication, tmp_path: Path) -> None:
+    paths = [make_image(tmp_path / f"image_{index}.png") for index in range(4)]
+    page = ImageToPdfPage()
+    page._add_images([str(path) for path in paths])
+    page._select_path(paths[2])
+
+    QTest.keyClick(page.image_list, Qt.Key_Up, Qt.AltModifier)
+
+    assert [entry.path for entry in page.collection.entries] == [paths[0], paths[2], paths[1], paths[3]]
+    assert page.image_list.paths_in_order() == [str(entry.path) for entry in page.collection.entries]
+    assert [item.data(PATH_ROLE) for item in page.image_list.selectedItems()] == [str(paths[2])]
+    assert page._current_entry().path == paths[2]
+
+    QTest.keyClick(page.image_list, Qt.Key_Down, Qt.AltModifier)
+    QTest.keyClick(page.image_list, Qt.Key_Down, Qt.AltModifier)
+
+    assert [entry.path for entry in page.collection.entries] == [paths[0], paths[1], paths[3], paths[2]]
+    assert page._current_entry().path == paths[2]
+
+    QTest.keyClick(page.image_list, Qt.Key_Down, Qt.AltModifier)  # already last: nothing changes
+
+    assert [entry.path for entry in page.collection.entries] == [paths[0], paths[1], paths[3], paths[2]]
+    assert [item.data(PATH_ROLE) for item in page.image_list.selectedItems()] == [str(paths[2])]

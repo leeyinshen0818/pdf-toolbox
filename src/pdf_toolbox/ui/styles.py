@@ -79,9 +79,15 @@ QLabel#ImageDimensions {{
     {_font(T.TYPE_CAPTION)}
 }}
 
-QLabel#ImageName {{
+QLabel#ImageName,
+QLabel#EditingLabel {{
     color: {T.TEXT};
     {_font(T.TYPE_BODY_STRONG)}
+}}
+
+QLabel#FieldHint {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_CAPTION)}
 }}
 
 QLabel#ImageOrderNumber {{
@@ -199,8 +205,8 @@ QPushButton#SecondaryActionButton {{
 QPushButton#PresetButton:checked {{
     background: {T.PRIMARY_TINT};
     color: {T.PRIMARY};
-    border: {border}px solid {T.PRIMARY};
-    font-weight: 600;
+    border: {selected_border} solid {T.PRIMARY};
+    font-weight: 700;
 }}
 
 QPushButton#PresetButton:checked:focus {{

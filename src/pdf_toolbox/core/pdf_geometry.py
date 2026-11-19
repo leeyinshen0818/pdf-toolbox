@@ -72,6 +72,16 @@ class ExportSettings:
 class PageLayout:
     page_size: PageSize
     image_rect: FitRect
+    margin: float = 0.0  # points on every side
+
+
+@dataclass(frozen=True)
+class PreviewRects:
+    """A page layout scaled into an on-screen box (all values in screen pixels)."""
+
+    page: FitRect
+    content: FitRect  # page minus margin
+    image: FitRect
 
 
 A4_PORTRAIT = PageSize(width=A4_WIDTH_POINTS, height=A4_HEIGHT_POINTS)
@@ -159,6 +169,38 @@ def calculate_page_layout(
             x1=fitted.x1 + margin,
             y1=fitted.y1 + margin,
         ),
+        margin=margin,
+    )
+
+
+def preview_rects(
+    layout: PageLayout,
+    box_width: float,
+    box_height: float,
+    inset: float = 0.0,
+) -> PreviewRects | None:
+    """Scale a page layout to fit centred inside a box, so the preview matches the PDF page.
+
+    Returns None when the box is too small to draw into.
+    """
+    available_width = box_width - 2 * inset
+    available_height = box_height - 2 * inset
+    if available_width <= 0 or available_height <= 0:
+        return None
+    page = layout.page_size
+    scale = min(available_width / page.width, available_height / page.height)
+    left = inset + (available_width - page.width * scale) / 2
+    top = inset + (available_height - page.height * scale) / 2
+
+    def scaled(x0: float, y0: float, x1: float, y1: float) -> FitRect:
+        return FitRect(left + x0 * scale, top + y0 * scale, left + x1 * scale, top + y1 * scale)
+
+    margin = layout.margin
+    image = layout.image_rect
+    return PreviewRects(
+        page=scaled(0, 0, page.width, page.height),
+        content=scaled(margin, margin, page.width - margin, page.height - margin),
+        image=scaled(image.x0, image.y0, image.x1, image.y1),
     )
 
 

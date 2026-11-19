@@ -92,6 +92,35 @@ class ImageCollection:
                 return
         raise KeyError(f"Image is not in the collection: {path}")
 
+    def apply_corrections_to_all(self, corrections: CorrectionSettings) -> int:
+        """Give every image the same corrections; returns how many images there are."""
+        normalized = corrections.normalized()
+        self._entries = [replace(entry, corrections=normalized) for entry in self._entries]
+        return len(self._entries)
+
+    def move_paths(self, paths: Iterable[str | Path], step: int) -> bool:
+        """Move the given images one place up (step=-1) or down (step=1), keeping them in order.
+
+        Returns False (and changes nothing) when an image is already at that end of the list.
+        """
+        if step not in (-1, 1):
+            raise ValueError("step must be -1 or 1")
+        moving = {image_key(path) for path in paths}
+        flags = [image_key(entry.path) in moving for entry in self._entries]
+        if not any(flags):
+            return False
+        if (step < 0 and flags[0]) or (step > 0 and flags[-1]):
+            return False
+        entries = list(self._entries)
+        indexes = range(len(entries)) if step < 0 else range(len(entries) - 1, -1, -1)
+        for index in indexes:
+            if flags[index]:
+                other = index + step
+                entries[index], entries[other] = entries[other], entries[index]
+                flags[index], flags[other] = flags[other], flags[index]
+        self._entries = entries
+        return True
+
     def clear(self) -> None:
         self._entries.clear()
         self._keys.clear()

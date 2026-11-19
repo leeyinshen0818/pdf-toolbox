@@ -21,6 +21,11 @@ class ElidedLabel(QLabel):
         self.setToolTip(text)
         self.setText(text)
 
+    def set_full_text(self, text: str) -> None:
+        self.full_text = text
+        self.setToolTip(text)
+        self._refresh_text()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._refresh_text()

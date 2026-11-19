@@ -12,6 +12,7 @@ from pdf_toolbox.core.pdf_geometry import (
     PageSizeMode,
     calculate_page_layout,
     fit_rect_to_page,
+    preview_rects,
 )
 
 
@@ -102,3 +103,41 @@ def test_small_and_big_margins_use_different_insets() -> None:
 def test_fit_rect_rejects_invalid_source_dimensions() -> None:
     with pytest.raises(ValueError, match="greater than zero"):
         fit_rect_to_page(0, 100)
+
+
+def test_preview_rects_for_fit_fill_the_box_with_the_image() -> None:
+    # 300x150 px at 150 dpi is a 144x72 pt page; a 400x400 box scales it by 400/144.
+    layout = calculate_page_layout(300, 150, ExportSettings())
+    rects = preview_rects(layout, 400, 400)
+
+    assert rects is not None
+    assert (rects.page.x0, rects.page.x1) == pytest.approx((0, 400))
+    assert (rects.page.y0, rects.page.y1) == pytest.approx((100, 300))
+    assert rects.content == rects.page
+    assert rects.image == rects.page
+
+
+def test_preview_rects_for_a4_with_margin_match_the_pdf_layout_scaled() -> None:
+    settings = ExportSettings(page_size=PageSizeMode.A4, margin=MarginPreset.SMALL)
+    layout = calculate_page_layout(1000, 500, settings)
+    inset = 10
+    rects = preview_rects(layout, 2 * A4_PORTRAIT.width + 2 * inset, 2 * A4_PORTRAIT.height + 2 * inset, inset=inset)
+
+    margin = A4_PORTRAIT.width * 0.04
+    image_width = A4_PORTRAIT.width - 2 * margin
+    image_height = image_width / 2
+    image_top = (A4_PORTRAIT.height - image_height) / 2
+
+    assert rects is not None
+    assert (rects.page.x0, rects.page.y0) == pytest.approx((inset, inset))
+    assert (rects.page.width, rects.page.height) == pytest.approx((2 * A4_PORTRAIT.width, 2 * A4_PORTRAIT.height))
+    assert (rects.content.x0, rects.content.y0) == pytest.approx((inset + 2 * margin, inset + 2 * margin))
+    assert (rects.content.x1, rects.content.y1) == pytest.approx(
+        (inset + 2 * (A4_PORTRAIT.width - margin), inset + 2 * (A4_PORTRAIT.height - margin))
+    )
+    assert (rects.image.x0, rects.image.y0) == pytest.approx((inset + 2 * margin, inset + 2 * image_top))
+    assert (rects.image.width, rects.image.height) == pytest.approx((2 * image_width, 2 * image_height))
+
+
+def test_preview_rects_need_room_to_draw() -> None:
+    assert preview_rects(calculate_page_layout(10, 10), 20, 20, inset=10) is None

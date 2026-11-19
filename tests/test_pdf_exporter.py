@@ -340,3 +340,44 @@ def test_cancelled_export_keeps_existing_target_and_leaves_no_temp_file(tmp_path
 
     assert target.read_bytes() == original_bytes
     assert list(output_dir.iterdir()) == [target]
+
+
+def make_photo_jpeg(path: Path, size=(640, 480), orientation: int | None = None) -> Path:
+    image = Image.effect_noise(size, 40).convert("RGB")
+    exif = Image.Exif()
+    if orientation is not None:
+        exif[0x0112] = orientation
+    image.save(path, format="JPEG", quality=90, exif=exif.tobytes())
+    return path
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        ExportSettings(),
+        ExportSettings(margin=MarginPreset.SMALL),
+        ExportSettings(page_size=PageSizeMode.A4, margin=MarginPreset.SMALL),
+        ExportSettings(page_size=PageSizeMode.LETTER, orientation=PageOrientation.LANDSCAPE, margin=MarginPreset.BIG),
+    ],
+)
+def test_fast_export_keeps_page_count_and_sizes(tmp_path: Path, settings: ExportSettings) -> None:
+    """Unchanged JPEGs are embedded as-is and the rest as raw pixels; page geometry must not change."""
+    plain = make_photo_jpeg(tmp_path / "plain.jpg", size=(640, 480))
+    rotated = make_photo_jpeg(tmp_path / "rotated.jpg", size=(640, 480), orientation=6)
+    corrected = make_photo_jpeg(tmp_path / "corrected.jpg", size=(300, 500))
+    transparent = make_transparent_png(tmp_path / "transparent.png", size=(200, 120))
+    collection = collection_for([plain, rotated, corrected, transparent])
+    collection.update_corrections(corrected, CorrectionSettings(SharpnessPreset.SHARP, TonePreset.BRIGHT_10))
+    output = tmp_path / "out.pdf"
+
+    PdfExporter().export(collection.entries, output, settings=settings)
+
+    # Oriented pixel sizes: the EXIF-rotated image is used upright (portrait).
+    expected_sizes = [(640, 480), (480, 640), (300, 500), (200, 120)]
+    with pymupdf.open(output) as document:
+        assert len(document) == 4
+        for page, (width, height) in zip(document, expected_sizes):
+            layout = calculate_page_layout(width, height, settings)
+            assert_page_size(page, layout.page_size.width, layout.page_size.height)
+            image = layout.image_rect
+            assert_rect_close(placed_image_rect(page), pymupdf.Rect(image.x0, image.y0, image.x1, image.y1))

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 import tempfile
 from typing import Callable, Iterable
@@ -16,7 +15,14 @@ from pdf_toolbox.core.pdf_geometry import ExportSettings, calculate_page_layout
 
 
 class PdfExportError(Exception):
-    """Raised when PDF export cannot complete."""
+    """Raised when PDF export cannot complete.
+
+    `filename` names the image that caused the failure, when one did.
+    """
+
+    def __init__(self, message: str, filename: str | None = None) -> None:
+        super().__init__(message)
+        self.filename = filename
 
 
 class PdfExportCancelled(Exception):
@@ -78,7 +84,7 @@ class PdfExporter:
         issues = self.validate_entries(ordered_entries)
         if issues:
             details = "\n".join(f"{issue.path.name}: {issue.reason}" for issue in issues)
-            raise PdfExportError(f"Some images cannot be exported:\n{details}")
+            raise PdfExportError(f"Some images cannot be exported:\n{details}", filename=issues[0].path.name)
 
         temp_path: Path | None = None
         document = pymupdf.open()
@@ -88,13 +94,16 @@ class PdfExporter:
             for index, entry in enumerate(ordered_entries, start=1):
                 if cancel_callback is not None and cancel_callback():
                     raise PdfExportCancelled()
-                image_bytes, width, height = self._prepare_image(entry.path, entry.corrections)
-                layout = calculate_page_layout(width, height, export_settings)
+                prepared = self._prepare_image(entry.path, entry.corrections)
+                layout = calculate_page_layout(prepared.width, prepared.height, export_settings)
                 page = document.new_page(width=layout.page_size.width, height=layout.page_size.height)
                 target = layout.image_rect
                 target_rect = pymupdf.Rect(target.x0, target.y0, target.x1, target.y1)
                 page.draw_rect(page.rect, color=None, fill=(1, 1, 1), overlay=False)
-                page.insert_image(target_rect, stream=image_bytes)
+                if prepared.jpeg_bytes is not None:
+                    page.insert_image(target_rect, stream=prepared.jpeg_bytes)
+                else:
+                    page.insert_image(target_rect, pixmap=prepared.pixmap)
 
                 if progress_callback is not None:
                     progress_callback(index, len(ordered_entries))
@@ -132,20 +141,55 @@ class PdfExporter:
                 except OSError:
                     pass
 
-    def _prepare_image(self, path: Path, corrections: CorrectionSettings | None = None) -> tuple[bytes, int, int]:
+    def _prepare_image(self, path: Path, corrections: CorrectionSettings | None = None) -> PreparedImage:
+        """Decode, correct and flatten one image for embedding.
+
+        Unchanged baseline-friendly JPEGs are embedded byte-for-byte (no re-encode, so no quality
+        change); they are still fully decoded first so a damaged file fails here, naming the file.
+        Everything else is handed to MuPDF as raw RGB pixels, which it stores losslessly; this
+        skips the slow PNG round-trip the exporter used to make for every page.
+        """
+        settings = (corrections or CorrectionSettings()).normalized()
         try:
             with Image.open(path) as image:
-                corrected = apply_corrections(image, corrections or CorrectionSettings())
+                image.load()
+                if _can_embed_jpeg_unchanged(image, settings):
+                    width, height = image.size
+                    if width <= 0 or height <= 0:
+                        raise PdfExportError(f"{path.name} has invalid dimensions.", filename=path.name)
+                    return PreparedImage(width, height, jpeg_bytes=path.read_bytes())
+
+                corrected = apply_corrections(image, settings)
                 rgb_image = flatten_to_white(corrected)
                 width, height = rgb_image.size
 
                 if width <= 0 or height <= 0:
-                    raise PdfExportError(f"{path.name} has invalid dimensions.")
+                    raise PdfExportError(f"{path.name} has invalid dimensions.", filename=path.name)
 
-                buffer = BytesIO()
-                rgb_image.save(buffer, format="PNG")
-                return buffer.getvalue(), width, height
+                pixmap = pymupdf.Pixmap(pymupdf.csRGB, width, height, rgb_image.tobytes("raw", "RGB"), 0)
+                return PreparedImage(width, height, pixmap=pixmap)
         except PdfExportError:
             raise
         except Exception as exc:
-            raise PdfExportError(f"This image could not be opened: {path.name}") from exc
+            raise PdfExportError(f"This image could not be opened: {path.name}", filename=path.name) from exc
+
+
+@dataclass(frozen=True)
+class PreparedImage:
+    width: int
+    height: int
+    jpeg_bytes: bytes | None = None
+    pixmap: pymupdf.Pixmap | None = None
+
+
+_EXIF_ORIENTATION_TAG = 0x0112
+
+
+def _can_embed_jpeg_unchanged(image: Image.Image, corrections: CorrectionSettings) -> bool:
+    """True when embedding the original JPEG gives the same picture as decoding and re-encoding it."""
+    if image.format != "JPEG" or image.mode not in {"RGB", "L"}:
+        return False  # CMYK/YCCK JPEGs render inconsistently across PDF viewers
+    if corrections != CorrectionSettings():
+        return False
+    orientation = image.getexif().get(_EXIF_ORIENTATION_TAG, 1)
+    return orientation in (None, 1)
