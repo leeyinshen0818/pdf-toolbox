@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+from typing import Sequence
 
 from PySide6.QtCore import QSize, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QStyledItemDelegate, QVBoxLayout, QWidget
 
+from pdf_toolbox.core.pdf_to_image import JpgQuality
 from pdf_toolbox.ui.tokens import BORDER, CARD_BG, CONTROL_HEIGHT, PAGE_BG, SHADOW_RGBA, SPACE_4, TEXT_SECONDARY
+
+
+# Plain-language JPG quality labels (best first); the underlying JpgQuality values are unchanged.
+JPG_QUALITY_CHOICES = (
+    (JpgQuality.MAXIMUM, "Best quality"),
+    (JpgQuality.HIGH, "Balanced"),
+    (JpgQuality.STANDARD, "Smaller file"),
+)
 
 
 class ElidedLabel(QLabel):
@@ -40,8 +50,13 @@ def enum_combo(
     *,
     min_contents_length: int | None = None,
     popup_min_width: int = 300,
+    choices: Sequence[tuple[Enum, str]] | None = None,
 ) -> QComboBox:
-    """Combo listing an Enum's values (text and data are the value)."""
+    """Combo listing an Enum's values (data is always the value).
+
+    The shown text is the value, unless `choices` gives (member, label) pairs, which also set
+    the order; use it for plain-language labels without changing the underlying values.
+    """
     combo = QComboBox()
     combo.setMinimumHeight(CONTROL_HEIGHT)
     combo.setMinimumWidth(260)
@@ -49,8 +64,8 @@ def enum_combo(
     if min_contents_length is not None:
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(min_contents_length)
-    for item in enum_type:
-        combo.addItem(item.value, item.value)
+    for item, label in choices if choices is not None else [(item, item.value) for item in enum_type]:
+        combo.addItem(label, item.value)
     # The default combo delegate ignores item stylesheets; this one honours the 36px rows.
     combo.setItemDelegate(QStyledItemDelegate(combo))
     combo.view().setObjectName("ComboPopup")

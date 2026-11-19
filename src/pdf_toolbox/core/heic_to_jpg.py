@@ -22,7 +22,11 @@ class HeicLoadError(Exception):
 
 
 class HeicConversionError(Exception):
-    """Raised when HEIC/HEIF conversion cannot complete."""
+    """Raised when HEIC/HEIF conversion cannot complete; `filename` names the photo at fault, when known."""
+
+    def __init__(self, message: str = "", filename: str | None = None) -> None:
+        super().__init__(message)
+        self.filename = filename
 
 
 class HeicConversionCancelled(Exception):
@@ -70,6 +74,15 @@ class AddHeicResult:
     added: tuple[HeicImageEntry, ...]
     rejected: tuple[RejectedHeic, ...]
     duplicates: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class DecodedHeic:
+    """One full decode of a photo: its upright size and a downscaled copy for display."""
+
+    image: Image.Image
+    width: int
+    height: int
 
 
 @dataclass(frozen=True)
@@ -169,11 +182,16 @@ class HeicToJpgService:
 
     def decode_preview_image(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> Image.Image:
         """Decode the file once and return an oriented RGB image no larger than max_size."""
+        return self.decode_for_display(path, max_size).image
+
+    def decode_for_display(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> DecodedHeic:
+        """Decode the file once: the upright full size plus an RGB copy no larger than max_size."""
         try:
             with Image.open(Path(path)) as image:
                 prepared = prepare_jpg_image(image)
+            width, height = prepared.size
             prepared.thumbnail(max_size, Image.Resampling.LANCZOS)
-            return prepared
+            return DecodedHeic(prepared, width, height)
         except Exception as exc:
             raise HeicLoadError("Preview unavailable for this image.") from exc
 
@@ -220,7 +238,9 @@ class HeicToJpgService:
                         target.unlink()
                     except OSError:
                         pass
-                raise HeicConversionError(f"Conversion stopped - failed to convert {entry.filename}.") from exc
+                raise HeicConversionError(
+                    f"Conversion stopped - failed to convert {entry.filename}.", filename=entry.filename
+                ) from exc
 
             completed.append(target)
             if progress_callback is not None:

@@ -16,7 +16,11 @@ class PdfLoadError(Exception):
 
 
 class PdfRenderError(Exception):
-    """Raised when a PDF page cannot be rendered."""
+    """Raised when pages cannot be rendered; `filename` names the PDF at fault, when known."""
+
+    def __init__(self, message: str = "", filename: str | None = None) -> None:
+        super().__init__(message)
+        self.filename = filename
 
 
 class ConversionCancelled(Exception):
@@ -202,7 +206,10 @@ class PdfToImageService:
                         target.unlink()
                     except OSError:
                         pass
-                raise PdfRenderError(f"Failed to render {ref.source_filename} page {ref.page_index + 1}.") from exc
+                raise PdfRenderError(
+                    f"Failed to render {ref.source_filename} page {ref.page_index + 1}.",
+                    filename=ref.source_filename,
+                ) from exc
 
             completed.append(target)
             if progress_callback is not None:

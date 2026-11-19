@@ -25,6 +25,7 @@ from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
+from pdf_toolbox.ui.threads import live_thread_count
 from pdf_toolbox.ui.components.drop_area import local_paths
 from pdf_toolbox.ui.components.page import ToolPage
 from pdf_toolbox.ui.styles import build_app_style
@@ -153,7 +154,9 @@ class MainWindow(QMainWindow):
         pages = self._pages()
         for page in pages:
             page.stop_background_work()
-        if wait_until(lambda: not any(page.has_background_work() for page in pages), CANCEL_WAIT_TIMEOUT_MS):
+        # live_thread_count covers worker threads a page has already let go of (e.g. after a clear).
+        idle = lambda: not any(page.has_background_work() for page in pages) and live_thread_count() == 0  # noqa: E731
+        if wait_until(idle, CANCEL_WAIT_TIMEOUT_MS):
             return True
 
         logger.warning("Background work did not stop within %s ms; close was postponed.", CANCEL_WAIT_TIMEOUT_MS)

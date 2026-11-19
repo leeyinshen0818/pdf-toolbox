@@ -58,8 +58,7 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     pdf_page = window.stack.widget(1)
     settings_scrolls = window.findChildren(QScrollArea, "SettingsScroll")
     assert pdf_page.convert_button.isVisible()
-    assert pdf_page.set_default_folder_button.text() == "Set as Default Folder"
-    assert pdf_page.thumbnail_list.isWrapping()
+    assert pdf_page.browse_output_folder_button.isVisible()
     assert all(scroll.minimumWidth() <= scroll.maximumWidth() for scroll in settings_scrolls)
 
     window.stack.setCurrentIndex(2)
@@ -72,7 +71,7 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
     app.processEvents()
     heic_page = window.stack.widget(3)
     assert heic_page.convert_button.text() == "Convert"
-    assert heic_page.set_default_folder_button.text() == "Set as Default Folder"
+    assert heic_page.browse_output_folder_button.isVisible()
 
 
 def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
@@ -132,9 +131,8 @@ def test_heic_to_jpg_settings_controls_do_not_spread_vertically(app: QApplicatio
     app.processEvents()
 
     assert page.output_folder_edit.y() - page.jpg_quality_combo.y() <= 90
-    assert page.set_default_folder_button.y() - page.output_folder_edit.y() <= 60
     assert not page.progress_bar.isVisible()  # progress only shows while a conversion runs
-    assert page_y(page, page.convert_button) > page_y(page, page.set_default_folder_button)
+    assert page_y(page, page.convert_button) > page_y(page, page.output_folder_edit)
 
 
 def test_pdf_to_image_keeps_settings_to_the_right(app: QApplication) -> None:
@@ -148,7 +146,6 @@ def test_pdf_to_image_keeps_settings_to_the_right(app: QApplication) -> None:
     assert page.content_layout.itemAt(1).widget() is page.settings_panel
     assert page.format_combo.isVisible()
     assert page.browse_output_folder_button.isVisible()
-    assert page.set_default_folder_button.isVisible()
     assert page.convert_button.isVisible()
     assert not hasattr(page, "_apply_responsive_layout")
     assert not hasattr(page, "_layout_mode")
