@@ -50,31 +50,20 @@ pdf-toolbox
 
 ## Build
 
-Install the project dependencies and PyInstaller build extra, then run:
+Install the pinned dependencies (Python 3.10, 64-bit) and the PyInstaller build extra, then run:
 
 ```powershell
-python -m pip install -e .[build]
+python -m pip install -c constraints.txt -e .[build]
 .\build.ps1
 ```
 
-The build creates a single-file app that can be copied to your Desktop or sent to another Windows PC:
+`build.ps1` stops if the installed packages differ from `constraints.txt`. It builds one single-file app that can be copied to your Desktop or sent to another Windows PC:
 
 ```text
-release/PDF-Toolbox-v1.0.0/PDF Toolbox.exe
-release/PDF-Toolbox-v1.0.0-Standalone.exe
+release/PDF-Toolbox-2.0.0.exe
 ```
 
-It also creates the conservative one-folder build:
-
-```text
-release/PDF-Toolbox-v1.0.0/PDF Toolbox/PDF Toolbox.exe
-```
-
-The build script also creates a ZIP containing the release folder:
-
-```text
-release/PDF-Toolbox-v1.0.0-Windows.zip
-```
+The app icon is generated from `icon/pdf_icon.png` with `python packaging_support/make_icon.py`.
 
 The single EXE is self-contained for normal use. Windows may take a few extra seconds to start it because PyInstaller extracts bundled runtime files into a temporary folder behind the scenes. The packaged app is intended for modern Windows 10 and Windows 11 PCs and should not require Python, pip, a virtual environment, Ghostscript, ImageMagick, Poppler, FFmpeg, or system HEIC codecs on the target computer.
 

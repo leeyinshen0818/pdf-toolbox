@@ -1,0 +1,24 @@
+# Exact versions used to build PDF Toolbox 2.0.0.
+# Built with CPython 3.10.6 (64-bit, Windows x64), pip 25.1.1.
+#
+# Install:  python -m pip install -c constraints.txt -e .[build]
+# build.ps1 checks the active environment against this file before building.
+
+# Runtime
+PySide6==6.11.1
+PySide6_Addons==6.11.1
+PySide6_Essentials==6.11.1
+shiboken6==6.11.1
+tomli==2.2.1
+pillow==11.2.1
+pillow_heif==1.5.0
+PyMuPDF==1.28.2
+
+# Build
+pyinstaller==6.22.0
+pyinstaller-hooks-contrib==2026.6
+altgraph==0.17.5
+packaging==24.2
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
+setuptools==63.2.0
