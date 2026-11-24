@@ -6,7 +6,7 @@ PDF Toolbox is a small offline Windows desktop app for practical PDF workflows. 
 
 ### Image -> PDF
 
-- Convert JPG/JPEG/PNG images into one PDF.
+- Convert JPG/JPEG, PNG, and WebP images into one PDF.
 - Drag and drop or select multiple images.
 - Reorder, preview, remove, and apply simple non-destructive corrections.
 - Export with Fit, A4, or US Letter page sizing.
@@ -30,7 +30,7 @@ PDF Toolbox is a small offline Windows desktop app for practical PDF workflows. 
 
 ## Supported Formats
 
-- Input images: JPG, JPEG, PNG
+- Image -> PDF input: JPG, JPEG, PNG, WebP
 - Input PDFs: PDF
 - Convert to JPG input: HEIC, HEIF, WebP, PNG
 - Output images: JPG, PNG
@@ -61,7 +61,7 @@ python -m pip install -c constraints.txt -e .[build]
 `build.ps1` stops if the installed packages differ from `constraints.txt`. It builds one single-file app that can be copied to your Desktop or sent to another Windows PC:
 
 ```text
-release/PDF-Toolbox-2.0.1.exe
+release/PDF-Toolbox-2.1.0.exe
 ```
 
 The app icon is generated from `icon/pdf_icon.png` with `python packaging_support/make_icon.py`.

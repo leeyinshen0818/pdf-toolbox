@@ -1,4 +1,4 @@
-# Exact versions used to build PDF Toolbox 2.0.1.
+# Exact versions used to build PDF Toolbox 2.1.0.
 # Built with CPython 3.10.6 (64-bit, Windows x64), pip 25.1.1.
 #
 # Install:  python -m pip install -c constraints.txt -e .[build]

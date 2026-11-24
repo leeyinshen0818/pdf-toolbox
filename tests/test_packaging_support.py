@@ -21,7 +21,7 @@ from pdf_toolbox.logging_config import configure_logging, log_file_path
 
 
 def test_version_is_centralized() -> None:
-    assert APP_VERSION == "2.0.1"
+    assert APP_VERSION == "2.1.0"
     assert pdf_toolbox.__version__ == APP_VERSION
 
 
