@@ -34,10 +34,19 @@ DANGER_TEXT = "#B91C1C"
 
 SHADOW_RGBA = (0, 0, 0, 14)  # soft drop shadow under page thumbnails
 
-# Format badges (Convert to JPG empty state): white text on each, contrast >= 4.5:1.
-BADGE_HEIC = "#2563EB"
-BADGE_WEBP = "#15803D"
-BADGE_PNG = "#C2410C"
+
+@dataclass(frozen=True)
+class BadgeColours:
+    text: str
+    fill: str
+    border: str  # a slightly darker tint of the fill
+
+
+# Format badges (Convert to JPG empty state): text-on-fill contrast >= 4.5:1
+# (HEIC 5.85, WebP 6.38, PNG 6.66).
+BADGE_HEIC = BadgeColours(text=PRIMARY_HOVER, fill=PRIMARY_TINT, border="#BFD2FB")
+BADGE_WEBP = BadgeColours(text=SUCCESS_TEXT, fill=SUCCESS_BG, border="#BEE3C9")
+BADGE_PNG = BadgeColours(text="#9A3412", fill=WARNING_BG, border="#F6D3A8")
 
 
 

@@ -201,12 +201,13 @@ def test_every_page_fits_a_600px_tall_work_area(app: QApplication, page_type) ->
     assert page.minimumSizeHint().height() <= 600
 
 def assert_empty_state_fits(state) -> None:
-    """Every visible part of the empty state lies inside it, at full height, without overlapping."""
-    parts = [state.headline, state.hint, state.format_badges, state.format_note, state.button]
+    """Visible parts lie inside the empty state at full height, top to bottom in this order, apart:
+    heading, hint, badges, button, caption."""
+    parts = [state.headline, state.hint, state.format_badges, state.button, state.caption]
     visible = [part for part in parts if part is not None and part.isVisible()]
     previous_bottom = None
     for part in visible:
-        geometry = part.geometry()
+        geometry = QRect(part.mapTo(state, QPoint(0, 0)), part.size())
         assert state.rect().contains(geometry), part.objectName()
         needed = part.heightForWidth(geometry.width()) if part.hasHeightForWidth() else part.sizeHint().height()
         assert geometry.height() >= needed, part.objectName()
@@ -244,14 +245,14 @@ def test_convert_to_jpg_empty_state_fits_without_clipping(app: QApplication, wid
 
     assert_empty_state_fits(state)
     if height >= 720:
-        assert state.format_badges.isVisible() and state.format_note.isVisible()
+        assert state.format_badges.isVisible() and state.caption.isVisible()
 
 
 @pytest.mark.parametrize("extra_width,stacked", [(-1, True), (0, False)])
 def test_convert_to_jpg_badges_stack_only_when_the_row_does_not_fit(
     app: QApplication, extra_width: int, stacked: bool
 ) -> None:
-    state = EmptyState("Heading", "Hint", "Add", format_badges=FORMAT_BADGES, format_note="Note")
+    state = EmptyState("Heading", None, "Add", format_badges=FORMAT_BADGES, caption="Caption")
     badges = state.format_badges
     margins = state.layout().contentsMargins()
     state.resize(badges.row_width() + extra_width + margins.left() + margins.right(), 1000)

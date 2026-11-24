@@ -3,11 +3,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QMimeData, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtCore import QMimeData, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from pdf_toolbox.ui.tokens import ON_PRIMARY, RADIUS_CARD, SPACE_8, SPACE_12, SPACE_16, TYPE_BADGE, qfont
+from pdf_toolbox.ui.tokens import (
+    RADIUS_CARD,
+    SPACE_8,
+    SPACE_12,
+    SPACE_16,
+    SPACE_24,
+    TYPE_BADGE,
+    BadgeColours,
+    qfont,
+)
 
 
 BADGE_PADDING_X = SPACE_16
@@ -27,13 +36,16 @@ def local_paths(mime: QMimeData) -> list[str]:
 
 
 class FormatBadge(QWidget):
-    """A solid rounded tile with a large white format name. Information only, never interactive."""
+    """A soft tinted tile (pale fill, thin border) with a large format name in the vivid hue.
 
-    def __init__(self, label: str, colour: str) -> None:
+    Information only, never interactive.
+    """
+
+    def __init__(self, label: str, colours: BadgeColours) -> None:
         super().__init__()
         self.setObjectName("FormatBadge")
         self.label = label
-        self._colour = QColor(colour)
+        self._colours = colours
         # Kept apart from the widget font, which the app stylesheet's inherited font would override.
         self._font = qfont(TYPE_BADGE)
         self.setAccessibleName(label)
@@ -56,10 +68,11 @@ class FormatBadge(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._colour)
-        painter.drawRoundedRect(self.rect(), RADIUS_CARD, RADIUS_CARD)
-        painter.setPen(QColor(ON_PRIMARY))
+        painter.setPen(QPen(QColor(self._colours.border), 1))
+        painter.setBrush(QColor(self._colours.fill))
+        # Inset by half the pen width so the 1px border sits crisply inside the tile.
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), RADIUS_CARD, RADIUS_CARD)
+        painter.setPen(QColor(self._colours.text))
         painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self.label)
 
@@ -71,10 +84,10 @@ class FormatBadges(QWidget):
     the widget, for height-for-width, and the height here depends on the row/stack choice.
     """
 
-    def __init__(self, badges: Sequence[tuple[str, str]]) -> None:
+    def __init__(self, badges: Sequence[tuple[str, BadgeColours]]) -> None:
         super().__init__()
         self.setObjectName("FormatBadges")
-        self.badges = [FormatBadge(label, colour) for label, colour in badges]
+        self.badges = [FormatBadge(label, colours) for label, colours in badges]
         self.tile_size = QSize(0, 0)
         for badge in self.badges:
             self.tile_size = self.tile_size.expandedTo(badge.natural_size())
@@ -131,9 +144,10 @@ class FormatBadges(QWidget):
 class EmptyState(QWidget):
     """Headline, one-line hint and a single primary button.
 
-    Optionally, between the hint and the button: one colour badge per accepted format and a
-    small note under them. These are information only, and are hidden (note first) when the
-    drop area is too short to show them without clipping.
+    With the optional format badges and/or a caption under the button, the content is laid
+    out in three clearly separated groups instead: headline (and hint, if any), the badges,
+    then the button with its caption. The badges are information only and are hidden when
+    the drop area is too short to show them without clipping.
     """
 
     action_requested = Signal()
@@ -141,10 +155,10 @@ class EmptyState(QWidget):
     def __init__(
         self,
         headline: str,
-        hint: str,
+        hint: str | None,
         button_text: str,
-        format_badges: Sequence[tuple[str, str]] | None = None,
-        format_note: str | None = None,
+        format_badges: Sequence[tuple[str, BadgeColours]] | None = None,
+        caption: str | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("EmptyState")
@@ -156,75 +170,84 @@ class EmptyState(QWidget):
         self.headline.setObjectName("DropTitle")
         self.headline.setAlignment(Qt.AlignCenter)
         self.headline.setWordWrap(True)
-        self.hint = QLabel(hint)
-        self.hint.setObjectName("SubtleText")
-        self.hint.setAlignment(Qt.AlignCenter)
-        self.hint.setWordWrap(True)
+        self.hint: QLabel | None = None
+        if hint:
+            self.hint = QLabel(hint)
+            self.hint.setObjectName("SubtleText")
+            self.hint.setAlignment(Qt.AlignCenter)
+            self.hint.setWordWrap(True)
         self.button = QPushButton(button_text)
         self.button.setObjectName("PrimaryButton")
         self.button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.button.clicked.connect(self.action_requested.emit)
 
-        self.format_badges: FormatBadges | None = None
-        self.format_note: QLabel | None = None
-        if format_badges:
-            self.format_badges = FormatBadges(format_badges)
-            # Use the full width, so the badges choose between a row and a stack on the real
-            # available width; labels centre their own text and the button keeps its centring.
-            layout.setAlignment(Qt.AlignVCenter)
-        if format_note:
-            self.format_note = QLabel(format_note)
-            self.format_note.setObjectName("FormatNote")
-            self.format_note.setAlignment(Qt.AlignCenter)
-            self.format_note.setWordWrap(True)
+        self.format_badges = FormatBadges(format_badges) if format_badges else None
+        self.caption: QLabel | None = None
+        if caption:
+            self.caption = QLabel(caption)
+            self.caption.setObjectName("EmptyCaption")
+            self.caption.setAlignment(Qt.AlignCenter)
+            self.caption.setWordWrap(True)
 
-        layout.addWidget(self.headline)
-        layout.addWidget(self.hint)
+        self._groups: list[QWidget] = []
+        if self.format_badges is None and self.caption is None:
+            # The plain empty state, unchanged: headline, hint, button.
+            layout.addWidget(self.headline)
+            if self.hint is not None:
+                layout.addWidget(self.hint)
+            layout.addSpacing(SPACE_12 - SPACE_8)
+            layout.addWidget(self.button, alignment=Qt.AlignCenter)
+            return
+
+        # Grouped: full width (the badges choose row or stack on the real width) and a wide gap
+        # between groups. A hidden group takes its gap with it.
+        layout.setAlignment(Qt.AlignVCenter)
+        layout.setSpacing(SPACE_24)
+        self._groups.append(_group([self.headline, self.hint]))
         if self.format_badges is not None:
-            layout.addWidget(self.format_badges)
-        if self.format_note is not None:
-            layout.addWidget(self.format_note)
-        layout.addSpacing(SPACE_12 - SPACE_8)
-        layout.addWidget(self.button, alignment=Qt.AlignCenter)
+            self._groups.append(self.format_badges)
+        self._groups.append(_group([self.button, self.caption], centre=self.button))
+        for group in self._groups:
+            layout.addWidget(group)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._fit_format_details()
+        self._fit_format_badges()
 
-    def _fit_format_details(self) -> None:
-        """Show the format badges and note only while everything fits at the current size."""
-        if self.format_badges is None and self.format_note is None:
+    def _fit_format_badges(self) -> None:
+        """Show the badges only while everything fits at the current size."""
+        if self.format_badges is None:
             return
         margins = self.layout().contentsMargins()
         width = max(1, self.width() - margins.left() - margins.right())
         available = self.height() - margins.top() - margins.bottom()
-        show_badges = (
-            self.format_badges is not None and self.content_height(width, badges=True, note=False) <= available
-        )
-        show_note = (
-            self.format_note is not None
-            and (show_badges or self.format_badges is None)
-            and self.content_height(width, badges=show_badges, note=True) <= available
-        )
-        if self.format_badges is not None:
-            self.format_badges.setVisible(show_badges)
-        if self.format_note is not None:
-            self.format_note.setVisible(show_note)
+        self.format_badges.setVisible(self.content_height(width, badges=True) <= available)
 
-    def content_height(self, width: int, *, badges: bool, note: bool) -> int:
-        """Column height at this width with the optional parts shown or not, as the layout stacks it."""
-        widgets: list[QWidget] = [self.headline, self.hint]
-        if badges and self.format_badges is not None:
-            widgets.append(self.format_badges)
-        if note and self.format_note is not None:
-            widgets.append(self.format_note)
-        widgets.append(self.button)
+    def content_height(self, width: int, *, badges: bool) -> int:
+        """Height of the grouped column at this width, with or without the badges."""
+        groups = [group for group in self._groups if badges or group is not self.format_badges]
         heights = [
-            widget.heightForWidth(width) if widget.hasHeightForWidth() else widget.sizeHint().height()
-            for widget in widgets
+            group.heightForWidth(width) if group.hasHeightForWidth() else group.sizeHint().height()
+            for group in groups
         ]
-        # One gap between each pair of widgets, plus the fixed spacer above the button (no gap of its own).
-        return sum(heights) + self.layout().spacing() * (len(widgets) - 1) + (SPACE_12 - SPACE_8)
+        return sum(heights) + self.layout().spacing() * (len(groups) - 1)
+
+
+def _group(widgets: Sequence[QWidget | None], *, centre: QWidget | None = None) -> QWidget:
+    """Stack widgets closely (SPACE_8 apart) as one unit of the grouped empty state."""
+    group = QWidget()
+    group.setObjectName("EmptyStateGroup")
+    layout = QVBoxLayout(group)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SPACE_8)
+    for widget in widgets:
+        if widget is None:
+            continue
+        if widget is centre:
+            layout.addWidget(widget, alignment=Qt.AlignCenter)
+        else:
+            layout.addWidget(widget)
+    return group
 
 
 class DropArea(QFrame):
@@ -268,10 +291,10 @@ class DropArea(QFrame):
 
 def empty_drop_area(
     headline: str,
-    hint: str,
+    hint: str | None,
     button_text: str,
-    format_badges: Sequence[tuple[str, str]] | None = None,
-    format_note: str | None = None,
+    format_badges: Sequence[tuple[str, BadgeColours]] | None = None,
+    caption: str | None = None,
 ) -> tuple[DropArea, EmptyState]:
-    state = EmptyState(headline, hint, button_text, format_badges, format_note)
+    state = EmptyState(headline, hint, button_text, format_badges, caption)
     return DropArea(state), state

@@ -296,10 +296,10 @@ class ConvertToJpgPage(ToolPage):
         self.stack = QStackedWidget()
         self.empty_state, empty = empty_drop_area(
             "Add photos to convert into JPG",
-            "Drag and drop photos here, or click Add Photos.",
+            None,
             "Add Photos",
             format_badges=FORMAT_BADGES,
-            format_note="Already JPG? No need to convert.",
+            caption="or drag and drop photos here",
         )
         self.empty_state.files_dropped.connect(self.add_dropped_files)
         empty.action_requested.connect(self._choose_photos)

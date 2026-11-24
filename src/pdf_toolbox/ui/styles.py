@@ -73,7 +73,7 @@ QLabel#CardTitle {{
     {_font(T.TYPE_SECTION_TITLE)}
 }}
 
-QLabel#FormatNote {{
+QLabel#EmptyCaption {{
     color: {T.TEXT_SECONDARY};
     {_font(T.TYPE_CAPTION)}
     background: transparent;
@@ -550,6 +550,7 @@ QScrollArea#SettingsScroll > QWidget > QWidget,
 QWidget#SettingsBody,
 QWidget#JobFooter,
 QWidget#EmptyState,
+QWidget#EmptyStateGroup,
 QWidget#FormatBadges {{
     background: transparent;
 }}
