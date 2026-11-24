@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from pdf_toolbox.build_metadata import APP_NAME
 from pdf_toolbox.resources import app_icon_path
-from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
+from pdf_toolbox.ui.image_to_jpg_page import ConvertToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
@@ -90,11 +90,11 @@ class MainWindow(QMainWindow):
         self.image_to_pdf_page = ImageToPdfPage()
         self.pdf_to_image_page = PdfToImagePage()
         self.pdf_organizer_page = PdfOrganizerPage()
-        self.heic_to_jpg_page = HeicToJpgPage()
+        self.convert_to_jpg_page = ConvertToJpgPage()
         self.stack.addWidget(self.image_to_pdf_page)
         self.stack.addWidget(self.pdf_to_image_page)
         self.stack.addWidget(self.pdf_organizer_page)
-        self.stack.addWidget(self.heic_to_jpg_page)
+        self.stack.addWidget(self.convert_to_jpg_page)
         self._closing = False
 
         layout.addWidget(sidebar)
@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
     def _pages(self) -> tuple:
-        return (self.image_to_pdf_page, self.pdf_to_image_page, self.pdf_organizer_page, self.heic_to_jpg_page)
+        return (self.image_to_pdf_page, self.pdf_to_image_page, self.pdf_organizer_page, self.convert_to_jpg_page)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._closing:
@@ -185,7 +185,7 @@ class MainWindow(QMainWindow):
             ("Image → PDF", "file-image"),
             ("PDF → Image", "images"),
             ("PDF Organizer", "layout-grid"),
-            ("HEIC → JPG", "image"),
+            ("Convert to JPG", "image"),
         ]
         nav_buttons: list[QPushButton] = []
         for index, (label, icon_name) in enumerate(nav_items):

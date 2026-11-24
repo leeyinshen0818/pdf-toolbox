@@ -14,7 +14,7 @@ from pdf_toolbox.ui import tokens as T
 
 
 # Plain layout constants (logical px); not text-bearing.
-ROW_THUMBNAIL = 58  # thumbnail box in Image->PDF and HEIC rows
+ROW_THUMBNAIL = 58  # thumbnail box in Image->PDF and Convert to JPG rows
 ROW_THUMBNAIL_IMAGE = 54  # pixmap drawn inside that box
 # Organizer page thumbnails (logical px), one box per thumbnail size; roughly A4 proportions.
 ORGANIZER_THUMBNAIL_BOXES = {
@@ -32,7 +32,7 @@ PAGE_THUMBNAIL_ITEM_WIDTH = 184
 
 @lru_cache(maxsize=None)
 def file_row_height() -> int:
-    """Image->PDF / HEIC list row: thumbnail beside a file name and a caption line."""
+    """Image->PDF / Convert to JPG list row: thumbnail beside a file name and a caption line."""
     text = T.line_height(T.TYPE_BODY_STRONG) + T.SPACE_4 + T.line_height(T.TYPE_CAPTION)
     return max(ROW_THUMBNAIL, text, T.MIN_TARGET) + 2 * T.SPACE_8
 

@@ -15,8 +15,8 @@ from pillow_heif import register_heif_opener
 
 from pdf_toolbox.core.output_location import OpenLocationResult
 from pdf_toolbox.core.pdf_to_image import JpgQuality
-from pdf_toolbox.core.path_keys import path_key as heic_key
-from pdf_toolbox.ui.heic_to_jpg_page import HEIC_OUTPUT_FOLDER_SETTING, HeicPreviewWidget, HeicToJpgPage
+from pdf_toolbox.core.path_keys import path_key as photo_key
+from pdf_toolbox.ui.image_to_jpg_page import CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING, PhotoPreviewWidget, ConvertToJpgPage
 
 
 register_heif_opener()
@@ -51,7 +51,7 @@ def isolated_settings(tmp_path: Path):
     QSettings().clear()
 
 
-def wait_for_decodes(page: HeicToJpgPage, timeout_ms: int = 20_000) -> None:
+def wait_for_decodes(page: ConvertToJpgPage, timeout_ms: int = 20_000) -> None:
     deadline = QDeadlineTimer(timeout_ms)
     while page.has_pending_decodes() or page.has_background_work():
         assert not deadline.hasExpired(), "background decoding did not finish"
@@ -68,7 +68,7 @@ def combo_values(combo) -> list[str]:
 
 
 def test_heic_to_jpg_defaults_and_empty_state(app: QApplication) -> None:
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
     labels = [label.text() for label in page.empty_state.findChildren(type(page.info_label))]
     buttons = page.empty_state.findChildren(QPushButton)
 
@@ -85,9 +85,9 @@ def test_heic_to_jpg_defaults_and_empty_state(app: QApplication) -> None:
 def test_heic_files_import_render_and_remove(app: QApplication, tmp_path: Path) -> None:
     first = make_heic(tmp_path / "first.heic", size=(40, 30))
     second = make_heic(tmp_path / "second.heif", size=(30, 40))
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
 
-    page._add_heic_paths([str(first), str(second)])
+    page._add_photo_paths([str(first), str(second)])
     wait_for_decodes(page)
 
     assert page.file_list.count() == 2
@@ -116,9 +116,9 @@ def test_duplicate_and_invalid_heic_import_handled(
     invalid.write_bytes(b"bad")
     warnings: list[str] = []
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, _title, message: warnings.append(message) or QMessageBox.Ok)
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
 
-    page._add_heic_paths([str(valid), str(valid), str(invalid)])
+    page._add_photo_paths([str(valid), str(valid), str(invalid)])
 
     assert page.file_list.count() == 1
     assert "Skipped 1 duplicate" in page.status_label.text()
@@ -132,7 +132,7 @@ def test_success_failure_and_cancel_output_opening(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
     output = tmp_path / "exports"
     output.mkdir()
     saved = output / "photo.jpg"
@@ -150,7 +150,7 @@ def test_success_failure_and_cancel_output_opening(
 
 
 def test_preview_widget_paints_loaded_pixmap(app: QApplication) -> None:
-    widget = HeicPreviewWidget()
+    widget = PhotoPreviewWidget()
     widget.resize(400, 400)
     source = QPixmap(120, 80)
     source.fill(QColor(255, 0, 0))
@@ -174,27 +174,27 @@ def test_output_folder_is_remembered_after_browse_and_after_a_successful_job(
     after_job = tmp_path / "after_job"
     chosen.mkdir()
     after_job.mkdir()
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
     page.open_output_location = lambda _path: OpenLocationResult(True)
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_args: str(chosen))
 
     page._choose_output_folder()
 
-    assert QSettings().value(HEIC_OUTPUT_FOLDER_SETTING, "", str) == str(chosen)
-    assert HeicToJpgPage().output_folder == chosen
+    assert QSettings().value(CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING, "", str) == str(chosen)
+    assert ConvertToJpgPage().output_folder == chosen
 
     page._set_output_folder(after_job)
     page._on_conversion_finished((after_job / "photo.jpg",))
 
-    assert QSettings().value(HEIC_OUTPUT_FOLDER_SETTING, "", str) == str(after_job)
-    assert HeicToJpgPage().output_folder == after_job
+    assert QSettings().value(CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING, "", str) == str(after_job)
+    assert ConvertToJpgPage().output_folder == after_job
 
 
 def test_photos_decode_in_the_background_into_thumbnail_preview_and_size(app: QApplication, tmp_path: Path) -> None:
     photo = make_heic(tmp_path / "photo.heic", size=(64, 40))
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
 
-    page._add_heic_paths([str(photo)])
+    page._add_photo_paths([str(photo)])
 
     # The row exists at once, before the photo has been decoded.
     assert page.file_list.count() == 1
@@ -204,16 +204,16 @@ def test_photos_decode_in_the_background_into_thumbnail_preview_and_size(app: QA
     assert page.thumbnail_cache.get(cache_key) is not None
     assert page.preview_cache.get(cache_key) is not None
     assert page.preview._pixmap is not None
-    assert page._decoded_sizes[heic_key(photo)] == (64, 40)
+    assert page._decoded_sizes[photo_key(photo)] == (64, 40)
     row = page.file_list.itemWidget(page.file_list.item(0))
     assert row.thumbnail_label.pixmap().cacheKey() == page.thumbnail_cache.get(cache_key).cacheKey()
 
 
 def test_clearing_mid_load_drops_results_still_being_decoded(app: QApplication, tmp_path: Path) -> None:
     photos = [make_heic(tmp_path / f"photo_{index}.heic", size=(400, 300)) for index in range(4)]
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
 
-    page._add_heic_paths([str(path) for path in photos])
+    page._add_photo_paths([str(path) for path in photos])
     assert page.has_pending_decodes()
     page._clear_files()
     wait_for_decodes(page)  # in-flight results arrive after the clear and must be ignored
@@ -226,6 +226,6 @@ def test_clearing_mid_load_drops_results_still_being_decoded(app: QApplication, 
     assert page.preview._pixmap is None
 
     # The page still works after a mid-load clear.
-    page._add_heic_paths([str(photos[0])])
+    page._add_photo_paths([str(photos[0])])
     wait_for_decodes(page)
     assert page.preview._pixmap is not None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 
+import pytest
 from PIL import Image, ImageFilter
 
 from pdf_toolbox.core.image_corrections import (
@@ -9,6 +10,7 @@ from pdf_toolbox.core.image_corrections import (
     SharpnessPreset,
     TonePreset,
     apply_corrections,
+    flatten_to_white,
 )
 
 
@@ -68,3 +70,41 @@ def test_reset_corrections() -> None:
     settings = CorrectionSettings(sharpness=SharpnessPreset.SHARPER, tone=TonePreset.STRONG)
 
     assert settings.reset_all() == CorrectionSettings()
+
+
+def _rgba_with_transparent_pixel() -> Image.Image:
+    image = Image.new("RGBA", (2, 1), (0, 0, 0, 0))  # transparent black would show as black if mishandled
+    image.putpixel((1, 0), (0, 0, 255, 255))
+    return image
+
+
+def _palette_with_transparent_index() -> Image.Image:
+    image = Image.new("P", (2, 1), 0)
+    image.putpalette([0, 0, 0, 0, 0, 255] + [0] * 762)
+    image.putpixel((1, 0), 1)
+    image.info["transparency"] = 0
+    return image
+
+
+@pytest.mark.parametrize(
+    "make_image",
+    [
+        _rgba_with_transparent_pixel,
+        lambda: _rgba_with_transparent_pixel().convert("LA"),
+        _palette_with_transparent_index,
+    ],
+    ids=["RGBA", "LA", "P-tRNS"],
+)
+def test_flatten_to_white_composites_transparency_onto_white(make_image) -> None:
+    flattened = flatten_to_white(make_image())
+
+    assert flattened.mode == "RGB"
+    assert flattened.getpixel((0, 0)) == (255, 255, 255)
+    assert flattened.getpixel((1, 0)) != (255, 255, 255)  # opaque pixel keeps its colour
+
+
+@pytest.mark.parametrize(("value", "expected"), [(100, 0), (30000, 117), (65535, 255)])
+def test_flatten_to_white_scales_16_bit_grey(value: int, expected: int) -> None:
+    flattened = flatten_to_white(Image.new("I;16", (1, 1), value))
+
+    assert flattened.getpixel((0, 0)) == (expected, expected, expected)

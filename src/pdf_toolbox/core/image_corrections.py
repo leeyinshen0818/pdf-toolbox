@@ -74,8 +74,16 @@ def apply_corrections(image: Image.Image, settings: CorrectionSettings) -> Image
     return corrected.copy()
 
 
+SIXTEEN_BIT_GREY_MODES = {"I", "I;16", "I;16L", "I;16B", "I;16N"}
+
+
 def flatten_to_white(image: Image.Image) -> Image.Image:
-    if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
+    """RGB copy of the image, with any transparency composited onto white."""
+    if image.mode in SIXTEEN_BIT_GREY_MODES:
+        # convert("RGB") would clip 16-bit values at 255; scale them to 8 bits first.
+        image = image.convert("I").point(lambda value: value / 256).convert("L")
+
+    if image.mode in {"RGBA", "LA", "PA"} or "transparency" in image.info:
         rgba = image.convert("RGBA")
         background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
         background.alpha_composite(rgba)

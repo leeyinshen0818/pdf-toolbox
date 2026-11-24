@@ -1,4 +1,4 @@
-"""One-row-per-file list used by the HEIC → JPG and PDF → Image pages.
+"""One-row-per-file list used by the Convert to JPG and PDF → Image pages.
 
 Each row: thumbnail, file name (elided, full path in the tooltip), one detail line and a trash
 button. Rows can be created with a placeholder thumbnail and filled in later.

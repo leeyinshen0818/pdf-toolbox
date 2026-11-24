@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QScrollArea
 
 from pdf_toolbox.app import ensure_window_starts_maximized
-from pdf_toolbox.ui.heic_to_jpg_page import HeicToJpgPage
+from pdf_toolbox.ui.image_to_jpg_page import ConvertToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.main_window import MainWindow
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
@@ -70,9 +70,9 @@ def test_main_pages_keep_key_controls_accessible_at_common_desktop_sizes(
 
     window.stack.setCurrentIndex(3)
     app.processEvents()
-    heic_page = window.stack.widget(3)
-    assert heic_page.convert_button.text() == "Convert"
-    assert heic_page.browse_output_folder_button.isVisible()
+    jpg_page = window.stack.widget(3)
+    assert jpg_page.convert_button.text() == "Convert"
+    assert jpg_page.browse_output_folder_button.isVisible()
 
 
 def test_startup_helper_requests_maximized_window(app: QApplication) -> None:
@@ -103,14 +103,14 @@ def test_three_panel_pages_keep_same_panel_order(app: QApplication) -> None:
     assert not hasattr(image_page, "_apply_responsive_layout")
     assert not hasattr(image_page, "_layout_mode")
 
-    heic_page = HeicToJpgPage()
-    assert isinstance(heic_page.content_layout, QHBoxLayout)
-    assert heic_page.content_layout.count() == 3
-    assert heic_page.content_layout.itemAt(0).widget() is heic_page.list_section
-    assert heic_page.content_layout.itemAt(1).widget() is heic_page.preview_section
-    assert heic_page.content_layout.itemAt(2).widget() is heic_page.settings_panel
-    assert not hasattr(heic_page, "_apply_responsive_layout")
-    assert not hasattr(heic_page, "_layout_mode")
+    jpg_page = ConvertToJpgPage()
+    assert isinstance(jpg_page.content_layout, QHBoxLayout)
+    assert jpg_page.content_layout.count() == 3
+    assert jpg_page.content_layout.itemAt(0).widget() is jpg_page.list_section
+    assert jpg_page.content_layout.itemAt(1).widget() is jpg_page.preview_section
+    assert jpg_page.content_layout.itemAt(2).widget() is jpg_page.settings_panel
+    assert not hasattr(jpg_page, "_apply_responsive_layout")
+    assert not hasattr(jpg_page, "_layout_mode")
 
 
 def test_image_to_pdf_settings_controls_do_not_spread_vertically(app: QApplication) -> None:
@@ -126,7 +126,7 @@ def test_image_to_pdf_settings_controls_do_not_spread_vertically(app: QApplicati
 
 
 def test_heic_to_jpg_settings_controls_do_not_spread_vertically(app: QApplication) -> None:
-    page = HeicToJpgPage()
+    page = ConvertToJpgPage()
     page.resize(1536, 816)
     page.show()
     app.processEvents()
@@ -187,12 +187,12 @@ def test_pdf_organizer_navigation_is_enabled(app: QApplication) -> None:
     assert buttons["PDF Organizer"].isEnabled()
     buttons["PDF Organizer"].click()
     assert window.stack.currentIndex() == 2
-    assert buttons["HEIC → JPG"].isEnabled()
-    buttons["HEIC → JPG"].click()
+    assert buttons["Convert to JPG"].isEnabled()
+    buttons["Convert to JPG"].click()
     assert window.stack.currentIndex() == 3
 
 
-@pytest.mark.parametrize("page_type", [ImageToPdfPage, PdfToImagePage, PdfOrganizerPage, HeicToJpgPage])
+@pytest.mark.parametrize("page_type", [ImageToPdfPage, PdfToImagePage, PdfOrganizerPage, ConvertToJpgPage])
 def test_every_page_fits_a_600px_tall_work_area(app: QApplication, page_type) -> None:
     page = page_type()
 

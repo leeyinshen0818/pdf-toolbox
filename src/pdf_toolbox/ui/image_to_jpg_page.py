@@ -23,24 +23,24 @@ from PySide6.QtWidgets import (
 )
 
 from pdf_toolbox.core.conversion_preferences import (
-    HEIC_SETTING_KEYS,
-    HeicPreferences,
-    heic_preferences_from_values,
-    heic_preferences_to_values,
+    CONVERT_TO_JPG_SETTING_KEYS,
+    ConvertToJpgPreferences,
+    convert_to_jpg_preferences_from_values,
+    convert_to_jpg_preferences_to_values,
 )
-from pdf_toolbox.core.heic_to_jpg import (
-    AddHeicResult,
-    HeicCollection,
-    HeicConversionCancelled,
-    HeicConversionError,
-    HeicImageEntry,
-    HeicJpgSettings,
-    HeicToJpgService,
-    SUPPORTED_HEIC_EXTENSIONS,
+from pdf_toolbox.core.image_to_jpg import (
+    AddPhotoResult,
+    PhotoCollection,
+    JpgConversionCancelled,
+    JpgConversionError,
+    PhotoEntry,
+    JpgSettings,
+    ImageToJpgService,
+    PHOTO_FORMATS_BY_EXTENSION,
 )
 from pdf_toolbox.core.lru_cache import LruCache
 from pdf_toolbox.core.output_location import open_output_location
-from pdf_toolbox.core.path_keys import path_key as heic_key
+from pdf_toolbox.core.path_keys import path_key as photo_key
 from pdf_toolbox.core.pdf_to_image import JpgQuality
 from pdf_toolbox.ui.components.drop_area import empty_drop_area
 from pdf_toolbox.ui.components.file_list import FileListWidget, FileRowWidget, row_placeholder
@@ -52,13 +52,14 @@ from pdf_toolbox.ui.metrics import ROW_THUMBNAIL_IMAGE, file_row_size_hint
 from pdf_toolbox.ui.tokens import BORDER, CARD_BG, PAGE_BG, SPACE_16, SPACE_4, SPACE_8, TEXT_SECONDARY, WARNING_TEXT
 
 
-HEIC_PATH_ROLE = Qt.UserRole + 40
-HEIC_OUTPUT_FOLDER_SETTING = "heic_to_jpg/output_folder"
-HEIC_PREVIEW_MAX_SIZE = (1000, 1000)
-HEIC_PREVIEW_CACHE_ENTRIES = 10
+PHOTO_PATH_ROLE = Qt.UserRole + 40
+# Key keeps its pre-rename "heic_to_jpg/" prefix so existing users keep their saved folder.
+CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING = "heic_to_jpg/output_folder"
+PREVIEW_MAX_SIZE = (1000, 1000)
+PREVIEW_CACHE_ENTRIES = 10
 # Row thumbnails are small (~54 px); the cap only matters for very large batches, where an
 # evicted thumbnail costs one more background decode when its row is rebuilt.
-HEIC_THUMBNAIL_CACHE_ENTRIES = 500
+THUMBNAIL_CACHE_ENTRIES = 500
 OPENING_TEXT = "Opening photo..."
 OPEN_FAILED_DETAIL = "Couldn't open this photo"
 FILE_ERROR_MESSAGE = "Couldn't open {filename}. Remove it and try again."
@@ -131,7 +132,7 @@ class DecodeQueue:
             return len(self._items)
 
 
-class HeicDecodeWorker(QObject):
+class PhotoDecodeWorker(QObject):
     """Decodes each queued photo once; size, preview and row thumbnail all come from that decode."""
 
     decoded = Signal(str, int, QImage, QImage, int, int)  # key, generation, preview, thumbnail, width, height
@@ -141,13 +142,13 @@ class HeicDecodeWorker(QObject):
     def __init__(self, queue: DecodeQueue) -> None:
         super().__init__()
         self.queue = queue
-        self.service = HeicToJpgService()
+        self.service = ImageToJpgService()
 
     def run(self) -> None:
         while (item := self.queue.pop()) is not None:
             key, path, generation = item
             try:
-                decoded = self.service.decode_for_display(path, max_size=HEIC_PREVIEW_MAX_SIZE)
+                decoded = self.service.decode_for_display(path, max_size=PREVIEW_MAX_SIZE)
                 preview = pil_rgb_to_qimage(decoded.image)
                 if preview.isNull():
                     raise ValueError("Decoded image is empty.")
@@ -155,14 +156,14 @@ class HeicDecodeWorker(QObject):
                     ROW_THUMBNAIL_IMAGE, ROW_THUMBNAIL_IMAGE, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
             except Exception as exc:
-                logger.warning("HEIC image could not be decoded: %s", path, exc_info=True)
+                logger.warning("Photo could not be decoded: %s", path, exc_info=True)
                 self.failed.emit(key, generation, str(exc))
                 continue
             self.decoded.emit(key, generation, preview, thumbnail, decoded.width, decoded.height)
         self.finished.emit()
 
 
-class HeicPreviewWidget(QWidget):
+class PhotoPreviewWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("PreviewWidget")
@@ -195,18 +196,18 @@ class HeicPreviewWidget(QWidget):
         painter.drawPixmap(x, y, fitted)
 
 
-class HeicConversionWorker(QObject):
+class JpgConversionWorker(QObject):
     progress = Signal(int, int, str, str)
     finished = Signal(object)
     cancelled = Signal(object)
     failed = Signal(str, str)  # log details, name of the photo at fault ("" if none)
 
-    def __init__(self, entries: tuple[HeicImageEntry, ...], output_folder: Path, settings: HeicJpgSettings) -> None:
+    def __init__(self, entries: tuple[PhotoEntry, ...], output_folder: Path, settings: JpgSettings) -> None:
         super().__init__()
         self.entries = entries
         self.output_folder = output_folder
         self.settings = settings
-        self.service = HeicToJpgService()
+        self.service = ImageToJpgService()
         self.cancel_requested = False
 
     def cancel(self) -> None:
@@ -221,12 +222,12 @@ class HeicConversionWorker(QObject):
                 progress_callback=self._on_progress,
                 cancel_callback=lambda: self.cancel_requested,
             )
-        except HeicConversionCancelled as exc:
+        except JpgConversionCancelled as exc:
             self.cancelled.emit(exc.completed_paths)
             return
         except Exception as exc:
-            logger.exception("HEIC to JPG conversion failed")
-            filename = exc.filename if isinstance(exc, HeicConversionError) else None
+            logger.exception("JPG conversion failed")
+            filename = exc.filename if isinstance(exc, JpgConversionError) else None
             self.failed.emit(str(exc), filename or "")
             return
         self.finished.emit(paths)
@@ -235,25 +236,25 @@ class HeicConversionWorker(QObject):
         self.progress.emit(current, total, str(source), str(target))
 
 
-class HeicToJpgPage(ToolPage):
-    ACCEPTED_EXTENSIONS = frozenset(SUPPORTED_HEIC_EXTENSIONS)
-    ACCEPTED_DESCRIPTION = "HEIC or HEIF photos"
+class ConvertToJpgPage(ToolPage):
+    ACCEPTED_EXTENSIONS = frozenset(PHOTO_FORMATS_BY_EXTENSION)
+    ACCEPTED_DESCRIPTION = "HEIC, WebP or PNG photos"
 
     def __init__(self) -> None:
         super().__init__()
-        self.service = HeicToJpgService()
-        self.collection = HeicCollection()
-        self.thumbnail_cache: LruCache[tuple[str, int], QPixmap] = LruCache(HEIC_THUMBNAIL_CACHE_ENTRIES)
-        self.preview_cache: LruCache[tuple[str, int], QPixmap] = LruCache(HEIC_PREVIEW_CACHE_ENTRIES)
+        self.service = ImageToJpgService()
+        self.collection = PhotoCollection()
+        self.thumbnail_cache: LruCache[tuple[str, int], QPixmap] = LruCache(THUMBNAIL_CACHE_ENTRIES)
+        self.preview_cache: LruCache[tuple[str, int], QPixmap] = LruCache(PREVIEW_CACHE_ENTRIES)
         self.conversion_thread: QThread | None = None
-        self.conversion_worker: HeicConversionWorker | None = None
+        self.conversion_worker: JpgConversionWorker | None = None
         self.output_folder: Path | None = None
         self.open_output_location = open_output_location
 
         # Background decoding. A clear bumps the generation so results still in flight are dropped.
         self._decode_queue = DecodeQueue()
         self._decode_thread: QThread | None = None
-        self._decode_worker: HeicDecodeWorker | None = None
+        self._decode_worker: PhotoDecodeWorker | None = None
         self._decode_generation = 0
         self._pending: set[str] = set()  # keys queued or being decoded
         self._decode_status: dict[str, str] = {}
@@ -269,12 +270,12 @@ class HeicToJpgPage(ToolPage):
         self._update_preview()
 
     def _build_ui(self) -> None:
-        self.build_scaffold("HEIC → JPG", "Convert HEIC and HEIF photos into high-quality JPG images.")
+        self.build_scaffold("Convert to JPG", "Convert HEIC, WebP and PNG photos into high-quality JPG images.")
 
         self.add_button = QPushButton("Add Photos")
         self.add_button.setObjectName("PrimaryButton")
         self.clear_button = QPushButton("Clear")
-        self.add_button.clicked.connect(self._choose_heics)
+        self.add_button.clicked.connect(self._choose_photos)
         self.clear_button.clicked.connect(self._clear_files)
         self.action_bar.addWidget(self.add_button)
         self.action_bar.addWidget(self.clear_button)
@@ -289,11 +290,11 @@ class HeicToJpgPage(ToolPage):
         self.stack = QStackedWidget()
         self.empty_state, empty = empty_drop_area(
             "Add photos to convert into JPG",
-            "Drag and drop HEIC or HEIF photos here.",
+            "Drag and drop HEIC, WebP or PNG photos here.",
             "Add Photos",
         )
         self.empty_state.files_dropped.connect(self.add_dropped_files)
-        empty.action_requested.connect(self._choose_heics)
+        empty.action_requested.connect(self._choose_photos)
         self.file_list = FileListWidget()
         self.file_list.files_dropped.connect(self.add_dropped_files)
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
@@ -308,7 +309,7 @@ class HeicToJpgPage(ToolPage):
         preview_layout.setSpacing(SPACE_8)
         preview_heading = QLabel("Preview")
         preview_heading.setObjectName("PanelHeading")
-        self.preview = HeicPreviewWidget()
+        self.preview = PhotoPreviewWidget()
         preview_layout.addWidget(preview_heading)
         preview_layout.addWidget(self.preview, 1)
 
@@ -354,15 +355,15 @@ class HeicToJpgPage(ToolPage):
         return panel
 
     # ---------------------------------------------------------------- adding and removing
-    def _choose_heics(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Select Photos", "", "HEIC photos (*.heic *.heif)")
+    def _choose_photos(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Photos", "", "Photos (*.heic *.heif *.webp *.png)")
         if files:
-            self._add_heic_paths(files)
+            self._add_photo_paths(files)
 
     def add_files(self, paths: list[str]) -> None:
-        self._add_heic_paths(paths)
+        self._add_photo_paths(paths)
 
-    def _add_heic_paths(self, paths: list[str]) -> None:
+    def _add_photo_paths(self, paths: list[str]) -> None:
         """Rows appear at once (header check only); pixels are decoded in the background."""
         had_selection = bool(self.file_list.selectedItems())
         result = self.collection.add_paths(paths, self.service)
@@ -377,14 +378,14 @@ class HeicToJpgPage(ToolPage):
         self._update_preview()
 
     def _sync_list_from_collection(self) -> None:
-        selected = {item.data(HEIC_PATH_ROLE) for item in self.file_list.selectedItems()}
+        selected = {item.data(PHOTO_PATH_ROLE) for item in self.file_list.selectedItems()}
         current = self._current_path()
         previous_blocked = self.file_list.blockSignals(True)
         try:
             self.file_list.clear()
             for entry in self.collection.entries:
                 item = QListWidgetItem()
-                item.setData(HEIC_PATH_ROLE, str(entry.path))
+                item.setData(PHOTO_PATH_ROLE, str(entry.path))
                 item.setSizeHint(file_row_size_hint())
                 self.file_list.addItem(item)
                 row = FileRowWidget(
@@ -404,18 +405,19 @@ class HeicToJpgPage(ToolPage):
         finally:
             self.file_list.blockSignals(previous_blocked)
 
-    def _row_detail(self, entry: HeicImageEntry) -> str:
-        key = heic_key(entry.path)
+    def _row_detail(self, entry: PhotoEntry) -> str:
+        key = photo_key(entry.path)
         status = self._decode_status.get(key)
         if status == DECODE_FAILED:
             return OPEN_FAILED_DETAIL
         size = self._decoded_sizes.get(key)
         if status == DECODE_READY and size is not None:
-            return f"{size[0]} x {size[1]} px"
+            detail = f"{size[0]} x {size[1]} px"
+            return f"{detail} · first frame only" if entry.n_frames > 1 else detail
         return OPENING_TEXT
 
-    def _row_thumbnail(self, entry: HeicImageEntry) -> QPixmap:
-        key = heic_key(entry.path)
+    def _row_thumbnail(self, entry: PhotoEntry) -> QPixmap:
+        key = photo_key(entry.path)
         if self._decode_status.get(key) == DECODE_FAILED:
             return row_placeholder("triangle-alert", WARNING_TEXT)
         cached = self.thumbnail_cache.get(self._cache_key(entry.path))
@@ -425,7 +427,7 @@ class HeicToJpgPage(ToolPage):
             self._request_decode(entry)  # thumbnail was evicted from the cache; decode it again
         return row_placeholder("image")
 
-    def _show_import_result(self, result: AddHeicResult) -> None:
+    def _show_import_result(self, result: AddPhotoResult) -> None:
         messages: list[str] = []
         if result.added:
             messages.append(f"Added {len(result.added)} photo(s).")
@@ -444,7 +446,7 @@ class HeicToJpgPage(ToolPage):
     def _remove_path(self, path: str) -> None:
         removed_index = self._row_for_path(path)
         removed_current = path == self._current_path()
-        key = heic_key(path)
+        key = photo_key(path)
         self._decode_queue.discard(key)
         self._pending.discard(key)  # a result still being decoded is dropped: the entry is gone
         self._decode_status.pop(key, None)
@@ -477,14 +479,14 @@ class HeicToJpgPage(ToolPage):
     def has_pending_decodes(self) -> bool:
         return bool(self._pending)
 
-    def _request_decode(self, entry: HeicImageEntry, *, front: bool = False) -> None:
-        key = heic_key(entry.path)
+    def _request_decode(self, entry: PhotoEntry, *, front: bool = False) -> None:
+        key = photo_key(entry.path)
         if self._decode_queue.closed:
             # A close was requested and then postponed; pick up where decoding stopped.
             self._decode_queue.reopen()
             self._pending.clear()
             for other in self.collection.entries:
-                if heic_key(other.path) not in self._decode_status and heic_key(other.path) != key:
+                if photo_key(other.path) not in self._decode_status and photo_key(other.path) != key:
                     self._enqueue(other, front=False)
         if key in self._pending:
             if front:
@@ -493,8 +495,8 @@ class HeicToJpgPage(ToolPage):
         self._enqueue(entry, front=front)
         self._ensure_decode_worker()
 
-    def _enqueue(self, entry: HeicImageEntry, *, front: bool) -> None:
-        key = heic_key(entry.path)
+    def _enqueue(self, entry: PhotoEntry, *, front: bool) -> None:
+        key = photo_key(entry.path)
         self._pending.add(key)
         self._decode_queue.push((key, entry.path, self._decode_generation), front=front)
 
@@ -504,7 +506,7 @@ class HeicToJpgPage(ToolPage):
         # Unparented and held by ui.threads until finished, so destroying this page mid-decode
         # never deletes a running thread; closing the queue makes the worker stop after one photo.
         thread = QThread()
-        worker = HeicDecodeWorker(self._decode_queue)
+        worker = PhotoDecodeWorker(self._decode_queue)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.decoded.connect(self._on_decoded)
@@ -537,7 +539,7 @@ class HeicToJpgPage(ToolPage):
             row.set_thumbnail(self.thumbnail_cache[cache_key])
             row.set_detail(self._row_detail(entry))
         current = self._current_entry()
-        if current is not None and heic_key(current.path) == key:
+        if current is not None and photo_key(current.path) == key:
             self._update_preview()
         self._update_info()
 
@@ -553,7 +555,7 @@ class HeicToJpgPage(ToolPage):
             row.set_detail(OPEN_FAILED_DETAIL)
         self.status_label.show_error(FILE_ERROR_MESSAGE.format(filename=entry.filename))
         current = self._current_entry()
-        if current is not None and heic_key(current.path) == key:
+        if current is not None and photo_key(current.path) == key:
             self._update_preview()
         self._update_info()
 
@@ -574,10 +576,10 @@ class HeicToJpgPage(ToolPage):
 
     def _remember_output_folder(self) -> None:
         if self.output_folder is not None:
-            QSettings().setValue(HEIC_OUTPUT_FOLDER_SETTING, str(self.output_folder))
+            QSettings().setValue(CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING, str(self.output_folder))
 
     def _load_output_folder_setting(self) -> None:
-        saved = QSettings().value(HEIC_OUTPUT_FOLDER_SETTING, "", str)
+        saved = QSettings().value(CONVERT_TO_JPG_OUTPUT_FOLDER_SETTING, "", str)
         folder = Path(saved) if saved else default_output_folder()
         if not folder.exists():
             folder = default_output_folder()
@@ -585,7 +587,7 @@ class HeicToJpgPage(ToolPage):
 
     def _load_preferences(self) -> None:
         store = QSettings()
-        saved = heic_preferences_from_values({key: store.value(key) for key in HEIC_SETTING_KEYS})
+        saved = convert_to_jpg_preferences_from_values({key: store.value(key) for key in CONVERT_TO_JPG_SETTING_KEYS})
         previous_blocked = self.jpg_quality_combo.blockSignals(True)
         try:
             self.jpg_quality_combo.setCurrentIndex(max(0, self.jpg_quality_combo.findData(saved.jpg_quality.value)))
@@ -593,26 +595,26 @@ class HeicToJpgPage(ToolPage):
             self.jpg_quality_combo.blockSignals(previous_blocked)
 
     def _save_preferences(self, _index: int | None = None) -> None:
-        preferences = HeicPreferences(jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()))
+        preferences = ConvertToJpgPreferences(jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()))
         store = QSettings()
-        for key, value in heic_preferences_to_values(preferences).items():
+        for key, value in convert_to_jpg_preferences_to_values(preferences).items():
             store.setValue(key, value)
 
     # ---------------------------------------------------------------- conversion
     def _start_conversion(self) -> None:
         if not self.collection.entries or self.output_folder is None or self.conversion_thread is not None:
             return
-        failed = [entry for entry in self.collection.entries if self._decode_status.get(heic_key(entry.path)) == DECODE_FAILED]
+        failed = [entry for entry in self.collection.entries if self._decode_status.get(photo_key(entry.path)) == DECODE_FAILED]
         if failed:
             self.status_label.show_error(FILE_ERROR_MESSAGE.format(filename=failed[0].filename))
             return
-        settings = HeicJpgSettings(jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()))
+        settings = JpgSettings(jpg_quality=JpgQuality(self.jpg_quality_combo.currentData()))
         self._set_converting(True)
         self.job_footer.set_progress(0, len(self.collection.entries))
         self.status_label.setText(f"Converting 0 of {len(self.collection.entries)} images...")
 
         thread = QThread(self)
-        worker = HeicConversionWorker(self.collection.entries, self.output_folder, settings)
+        worker = JpgConversionWorker(self.collection.entries, self.output_folder, settings)
         self.conversion_thread = thread
         self.conversion_worker = worker
         worker.moveToThread(thread)
@@ -656,7 +658,7 @@ class HeicToJpgPage(ToolPage):
         if completed and self.output_folder is not None:
             result = self.open_output_location(self.output_folder)
             if not result.success:
-                logger.warning("Could not open HEIC output folder: %s", result.message)
+                logger.warning("Could not open JPG output folder: %s", result.message)
                 self.status_label.show_warning("Conversion complete, but the output folder could not be opened.")
 
     def _on_conversion_cancelled(self, paths: object) -> None:
@@ -666,13 +668,13 @@ class HeicToJpgPage(ToolPage):
 
     def _on_conversion_failed(self, message: str, filename: str = "") -> None:
         self._set_converting(False)
-        logger.error("HEIC to JPG conversion failed: %s", message)
+        logger.error("JPG conversion failed: %s", message)
         if filename:
             self.status_label.show_error(FILE_ERROR_MESSAGE.format(filename=filename))
         else:
             self.status_label.show_error(CONVERSION_FAILED_MESSAGE)
 
-    def _clear_conversion_worker(self, thread: QThread, worker: HeicConversionWorker) -> None:
+    def _clear_conversion_worker(self, thread: QThread, worker: JpgConversionWorker) -> None:
         if self.conversion_thread is thread:
             self.conversion_thread = None
         if self.conversion_worker is worker:
@@ -690,7 +692,7 @@ class HeicToJpgPage(ToolPage):
             empty_text = "Add photos to begin" if not self.collection.entries else "Select a photo to preview"
             self.preview.set_preview(None, empty_text)
             return
-        key = heic_key(entry.path)
+        key = photo_key(entry.path)
         if self._decode_status.get(key) == DECODE_FAILED:
             self.preview.set_preview(None, FILE_ERROR_MESSAGE.format(filename=entry.filename))
             return
@@ -742,7 +744,7 @@ class HeicToJpgPage(ToolPage):
         self.file_list.clearSelection()
         for index in range(self.file_list.count()):
             item = self.file_list.item(index)
-            if item.data(HEIC_PATH_ROLE) == target:
+            if item.data(PHOTO_PATH_ROLE) == target:
                 self.file_list.setCurrentItem(item)
                 item.setSelected(True)
                 return
@@ -750,34 +752,34 @@ class HeicToJpgPage(ToolPage):
     def _row_for_path(self, path: str | Path) -> int:
         target = str(path)
         for index in range(self.file_list.count()):
-            if self.file_list.item(index).data(HEIC_PATH_ROLE) == target:
+            if self.file_list.item(index).data(PHOTO_PATH_ROLE) == target:
                 return index
         return 0
 
     def _row_widget_for_key(self, key: str) -> FileRowWidget | None:
         for index in range(self.file_list.count()):
             item = self.file_list.item(index)
-            if heic_key(item.data(HEIC_PATH_ROLE)) == key:
+            if photo_key(item.data(PHOTO_PATH_ROLE)) == key:
                 widget = self.file_list.itemWidget(item)
                 return widget if isinstance(widget, FileRowWidget) else None
         return None
 
-    def _entry_for_key(self, key: str) -> HeicImageEntry | None:
+    def _entry_for_key(self, key: str) -> PhotoEntry | None:
         for entry in self.collection.entries:
-            if heic_key(entry.path) == key:
+            if photo_key(entry.path) == key:
                 return entry
         return None
 
     def _current_path(self) -> str | None:
         item = self.file_list.currentItem()
-        return item.data(HEIC_PATH_ROLE) if item is not None else None
+        return item.data(PHOTO_PATH_ROLE) if item is not None else None
 
-    def _current_entry(self) -> HeicImageEntry | None:
+    def _current_entry(self) -> PhotoEntry | None:
         selected = self.file_list.selectedItems()
         if not selected:
             return None
         current = self.file_list.currentItem()
-        target = current.data(HEIC_PATH_ROLE) if current in selected else selected[0].data(HEIC_PATH_ROLE)
+        target = current.data(PHOTO_PATH_ROLE) if current in selected else selected[0].data(PHOTO_PATH_ROLE)
         for entry in self.collection.entries:
             if str(entry.path) == target:
                 return entry

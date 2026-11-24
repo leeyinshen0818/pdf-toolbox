@@ -9,7 +9,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pdf_toolbox.build_metadata import APP_NAME, APP_ORGANIZATION, APP_VERSION
-from pdf_toolbox.core.heic_to_jpg import register_heic_support
+from pdf_toolbox.core.image_to_jpg import register_heic_support
 from pdf_toolbox.logging_config import configure_logging
 from pdf_toolbox.resources import app_icon_path
 from pdf_toolbox.ui.main_window import MainWindow

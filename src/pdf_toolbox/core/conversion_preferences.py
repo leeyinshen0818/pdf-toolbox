@@ -1,4 +1,4 @@
-"""PDF → Image and HEIC → JPG choices remembered between launches.
+"""PDF → Image and Convert to JPG choices remembered between launches.
 
 Same pattern as image_to_pdf_preferences: enum names are stored, and anything missing or
 unrecognised falls back to the default. Output folders use their own keys (see the pages).
@@ -17,8 +17,9 @@ PDF_TO_IMAGE_RESOLUTION_KEY = "pdf_to_image/resolution"
 PDF_TO_IMAGE_JPG_QUALITY_KEY = "pdf_to_image/jpg_quality"
 PDF_TO_IMAGE_SETTING_KEYS = (PDF_TO_IMAGE_FORMAT_KEY, PDF_TO_IMAGE_RESOLUTION_KEY, PDF_TO_IMAGE_JPG_QUALITY_KEY)
 
-HEIC_JPG_QUALITY_KEY = "heic_to_jpg/jpg_quality"
-HEIC_SETTING_KEYS = (HEIC_JPG_QUALITY_KEY,)
+# Key keeps its pre-rename "heic_to_jpg/" prefix so existing users keep their saved quality.
+CONVERT_TO_JPG_QUALITY_KEY = "heic_to_jpg/jpg_quality"
+CONVERT_TO_JPG_SETTING_KEYS = (CONVERT_TO_JPG_QUALITY_KEY,)
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class PdfToImagePreferences:
 
 
 @dataclass(frozen=True)
-class HeicPreferences:
+class ConvertToJpgPreferences:
     jpg_quality: JpgQuality = JpgQuality.MAXIMUM
 
 
@@ -50,12 +51,12 @@ def pdf_to_image_preferences_from_values(values: Mapping[str, object]) -> PdfToI
     )
 
 
-def heic_preferences_to_values(preferences: HeicPreferences) -> dict[str, str]:
-    return {HEIC_JPG_QUALITY_KEY: JpgQuality(preferences.jpg_quality).name}
+def convert_to_jpg_preferences_to_values(preferences: ConvertToJpgPreferences) -> dict[str, str]:
+    return {CONVERT_TO_JPG_QUALITY_KEY: JpgQuality(preferences.jpg_quality).name}
 
 
-def heic_preferences_from_values(values: Mapping[str, object]) -> HeicPreferences:
-    defaults = HeicPreferences()
-    return HeicPreferences(
-        jpg_quality=enum_or_default(JpgQuality, values.get(HEIC_JPG_QUALITY_KEY), defaults.jpg_quality),
+def convert_to_jpg_preferences_from_values(values: Mapping[str, object]) -> ConvertToJpgPreferences:
+    defaults = ConvertToJpgPreferences()
+    return ConvertToJpgPreferences(
+        jpg_quality=enum_or_default(JpgQuality, values.get(CONVERT_TO_JPG_QUALITY_KEY), defaults.jpg_quality),
     )

@@ -22,16 +22,17 @@ PDF Toolbox is a small offline Windows desktop app for practical PDF workflows. 
 - Reorder, rotate, duplicate, delete, and combine PDF pages.
 - Export the arranged pages into a new PDF without changing the source PDFs.
 
-### HEIC -> JPG
+### Convert to JPG
 
-- Convert HEIC/HEIF photos into JPG.
+- Convert HEIC/HEIF, WebP, and PNG photos into JPG.
 - Preview files, batch convert, preserve orientation, and choose JPG quality.
+- Transparent areas become white; animated WebP and PNG files use their first frame.
 
 ## Supported Formats
 
 - Input images: JPG, JPEG, PNG
 - Input PDFs: PDF
-- HEIC input: HEIC, HEIF
+- Convert to JPG input: HEIC, HEIF, WebP, PNG
 - Output images: JPG, PNG
 - Output documents: PDF
 

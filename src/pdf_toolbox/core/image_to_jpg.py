@@ -9,75 +9,83 @@ from typing import Callable, Iterable
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
-from pdf_toolbox.core.image_validation import oriented_size
+from pdf_toolbox.core.image_corrections import flatten_to_white
+from pdf_toolbox.core.image_validation import EXIF_ORIENTATION_TAG, oriented_size
 from pdf_toolbox.core.pdf_to_image import JpgQuality, collision_safe_path, safe_filename_stem
-from pdf_toolbox.core.path_keys import path_key as heic_key
+from pdf_toolbox.core.path_keys import path_key as photo_key
 
 
-SUPPORTED_HEIC_EXTENSIONS = {".heic", ".heif"}
+# Accepted extension -> the Pillow format the file's contents must actually be.
+PHOTO_FORMATS_BY_EXTENSION = {".heic": "HEIF", ".heif": "HEIF", ".webp": "WEBP", ".png": "PNG"}
+# Only these can hold several frames whose first frame is what gets converted (animated WebP, APNG).
+# HEIF is left out: the opener shows the primary image, which is not necessarily the first.
+MULTI_FRAME_FORMATS = {"WEBP", "PNG"}
 
 
-class HeicLoadError(Exception):
-    """Raised when a HEIC/HEIF file cannot be loaded."""
+class PhotoLoadError(Exception):
+    """Raised when a photo cannot be loaded."""
 
 
-class HeicConversionError(Exception):
-    """Raised when HEIC/HEIF conversion cannot complete; `filename` names the photo at fault, when known."""
+class JpgConversionError(Exception):
+    """Raised when JPG conversion cannot complete; `filename` names the photo at fault, when known."""
 
     def __init__(self, message: str = "", filename: str | None = None) -> None:
         super().__init__(message)
         self.filename = filename
 
 
-class HeicConversionCancelled(Exception):
+class JpgConversionCancelled(Exception):
     def __init__(self, completed_paths: tuple[Path, ...]) -> None:
         super().__init__("Conversion cancelled.")
         self.completed_paths = completed_paths
 
 
 @dataclass(frozen=True)
-class HeicImageInfo:
+class PhotoInfo:
     path: Path
     filename: str
     width: int
     height: int
     file_size_bytes: int
+    n_frames: int = 1
 
 
 @dataclass(frozen=True)
-class HeicImageEntry:
+class PhotoEntry:
     path: Path
     filename: str
     width: int
     height: int
     file_size_bytes: int
+    n_frames: int = 1
 
     @classmethod
-    def from_info(cls, info: HeicImageInfo) -> "HeicImageEntry":
+    def from_info(cls, info: PhotoInfo) -> "PhotoEntry":
         return cls(
             path=info.path,
             filename=info.filename,
             width=info.width,
             height=info.height,
             file_size_bytes=info.file_size_bytes,
+            n_frames=info.n_frames,
         )
 
 
 @dataclass(frozen=True)
-class RejectedHeic:
+class RejectedPhoto:
     path: Path
     reason: str
 
 
 @dataclass(frozen=True)
-class AddHeicResult:
-    added: tuple[HeicImageEntry, ...]
-    rejected: tuple[RejectedHeic, ...]
+class AddPhotoResult:
+    added: tuple[PhotoEntry, ...]
+    rejected: tuple[RejectedPhoto, ...]
     duplicates: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
-class DecodedHeic:
+class DecodedPhoto:
     """One full decode of a photo: its upright size and a downscaled copy for display."""
 
     image: Image.Image
@@ -86,7 +94,7 @@ class DecodedHeic:
 
 
 @dataclass(frozen=True)
-class HeicJpgSettings:
+class JpgSettings:
     jpg_quality: JpgQuality = JpgQuality.MAXIMUM
 
 
@@ -98,102 +106,108 @@ def register_heic_support() -> None:
     register_heif_opener()
 
 
-class HeicCollection:
+class PhotoCollection:
     def __init__(self) -> None:
-        self._entries: list[HeicImageEntry] = []
+        self._entries: list[PhotoEntry] = []
         self._keys: set[str] = set()
 
     @property
-    def entries(self) -> tuple[HeicImageEntry, ...]:
+    def entries(self) -> tuple[PhotoEntry, ...]:
         return tuple(self._entries)
 
     def __len__(self) -> int:
         return len(self._entries)
 
-    def add_paths(self, paths: Iterable[str | Path], service: "HeicToJpgService") -> AddHeicResult:
-        added: list[HeicImageEntry] = []
-        rejected: list[RejectedHeic] = []
+    def add_paths(self, paths: Iterable[str | Path], service: "ImageToJpgService") -> AddPhotoResult:
+        added: list[PhotoEntry] = []
+        rejected: list[RejectedPhoto] = []
         duplicates: list[Path] = []
 
         for raw_path in paths:
             path = Path(raw_path)
-            key = heic_key(path)
+            key = photo_key(path)
             if key in self._keys:
                 duplicates.append(path)
                 continue
 
             try:
                 info = service.load_image_info(path)
-            except HeicLoadError as exc:
-                rejected.append(RejectedHeic(path=path, reason=str(exc)))
+            except PhotoLoadError as exc:
+                rejected.append(RejectedPhoto(path=path, reason=str(exc)))
                 continue
 
-            entry = HeicImageEntry.from_info(info)
+            entry = PhotoEntry.from_info(info)
             self._entries.append(entry)
             self._keys.add(key)
             added.append(entry)
 
-        return AddHeicResult(tuple(added), tuple(rejected), tuple(duplicates))
+        return AddPhotoResult(tuple(added), tuple(rejected), tuple(duplicates))
 
     def remove_path(self, path: str | Path) -> None:
-        key = heic_key(path)
-        self._entries = [entry for entry in self._entries if heic_key(entry.path) != key]
-        self._keys = {heic_key(entry.path) for entry in self._entries}
+        key = photo_key(path)
+        self._entries = [entry for entry in self._entries if photo_key(entry.path) != key]
+        self._keys = {photo_key(entry.path) for entry in self._entries}
 
     def clear(self) -> None:
         self._entries.clear()
         self._keys.clear()
 
 
-class HeicToJpgService:
+class ImageToJpgService:
     def __init__(self) -> None:
         register_heic_support()
 
-    def load_image_info(self, path: str | Path) -> HeicImageInfo:
+    def load_image_info(self, path: str | Path) -> PhotoInfo:
         image_path = Path(path)
         if not image_path.exists():
-            raise HeicLoadError("The source file could not be found.")
+            raise PhotoLoadError("The source file could not be found.")
         if not image_path.is_file():
-            raise HeicLoadError("Path is not a file.")
-        if image_path.suffix.lower() not in SUPPORTED_HEIC_EXTENSIONS:
-            raise HeicLoadError("Unsupported file type. Use HEIC or HEIF files.")
+            raise PhotoLoadError("Path is not a file.")
+        extension = image_path.suffix.lower()
+        expected_format = PHOTO_FORMATS_BY_EXTENSION.get(extension)
+        if expected_format is None:
+            raise PhotoLoadError("Unsupported file type. Use HEIC, HEIF, WebP or PNG files.")
 
         # Header only: the pixels are decoded once later, by decode_preview_image.
         try:
             with Image.open(image_path) as image:
-                if image.format != "HEIF":
-                    raise HeicLoadError("This file is not a supported HEIC or HEIF image.")
+                if image.format != expected_format:
+                    raise PhotoLoadError(
+                        f"This file is not a supported image: its contents do not match the {extension} extension."
+                    )
                 width, height = oriented_size(image)
-        except HeicLoadError:
+                n_frames = getattr(image, "n_frames", 1) if expected_format in MULTI_FRAME_FORMATS else 1
+        except PhotoLoadError:
             raise
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
-            raise HeicLoadError("This HEIC image could not be opened.") from exc
+            raise PhotoLoadError("This image could not be opened.") from exc
 
         if width <= 0 or height <= 0:
-            raise HeicLoadError("Image has invalid dimensions.")
+            raise PhotoLoadError("Image has invalid dimensions.")
 
-        return HeicImageInfo(
+        return PhotoInfo(
             path=image_path,
             filename=image_path.name,
             width=width,
             height=height,
             file_size_bytes=image_path.stat().st_size,
+            n_frames=n_frames,
         )
 
     def decode_preview_image(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> Image.Image:
         """Decode the file once and return an oriented RGB image no larger than max_size."""
         return self.decode_for_display(path, max_size).image
 
-    def decode_for_display(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> DecodedHeic:
+    def decode_for_display(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> DecodedPhoto:
         """Decode the file once: the upright full size plus an RGB copy no larger than max_size."""
         try:
             with Image.open(Path(path)) as image:
                 prepared = prepare_jpg_image(image)
             width, height = prepared.size
             prepared.thumbnail(max_size, Image.Resampling.LANCZOS)
-            return DecodedHeic(prepared, width, height)
+            return DecodedPhoto(prepared, width, height)
         except Exception as exc:
-            raise HeicLoadError("Preview unavailable for this image.") from exc
+            raise PhotoLoadError("Preview unavailable for this image.") from exc
 
     def render_preview_png_bytes(self, path: str | Path, max_size: tuple[int, int] = (1000, 1000)) -> bytes:
         prepared = self.decode_preview_image(path, max_size)
@@ -202,32 +216,32 @@ class HeicToJpgService:
             prepared.save(buffer, format="PNG")
             return buffer.getvalue()
         except Exception as exc:
-            raise HeicLoadError("Preview unavailable for this image.") from exc
+            raise PhotoLoadError("Preview unavailable for this image.") from exc
 
     def convert_entries(
         self,
-        entries: Iterable[HeicImageEntry],
+        entries: Iterable[PhotoEntry],
         output_folder: str | Path,
-        settings: HeicJpgSettings,
+        settings: JpgSettings,
         *,
         progress_callback: ProgressCallback | None = None,
         cancel_callback: CancelCallback | None = None,
     ) -> tuple[Path, ...]:
         output_dir = Path(output_folder)
         if not output_dir.exists():
-            raise HeicConversionError("The selected output folder is no longer available.")
+            raise JpgConversionError("The selected output folder is no longer available.")
         if not output_dir.is_dir():
-            raise HeicConversionError("Output path is not a folder.")
+            raise JpgConversionError("Output path is not a folder.")
 
         ordered_entries = tuple(entries)
         if not ordered_entries:
-            raise HeicConversionError("No HEIC files available to convert.")
+            raise JpgConversionError("No photos available to convert.")
 
         completed: list[Path] = []
         total = len(ordered_entries)
         for done, entry in enumerate(ordered_entries, start=1):
             if cancel_callback is not None and cancel_callback():
-                raise HeicConversionCancelled(tuple(completed))
+                raise JpgConversionCancelled(tuple(completed))
 
             target = collision_safe_path(output_dir, f"{safe_filename_stem(entry.path.stem)}.jpg")
             try:
@@ -238,7 +252,7 @@ class HeicToJpgService:
                         target.unlink()
                     except OSError:
                         pass
-                raise HeicConversionError(
+                raise JpgConversionError(
                     f"Conversion stopped - failed to convert {entry.filename}.", filename=entry.filename
                 ) from exc
 
@@ -248,9 +262,9 @@ class HeicToJpgService:
 
         return tuple(completed)
 
-    def _convert_one_atomic(self, source: Path, target: Path, settings: HeicJpgSettings) -> None:
+    def _convert_one_atomic(self, source: Path, target: Path, settings: JpgSettings) -> None:
         if not source.exists():
-            raise HeicConversionError(f"The source file could not be found: {source.name}")
+            raise JpgConversionError(f"The source file could not be found: {source.name}")
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", dir=target.parent, delete=False) as temp_file:
             temp_path = Path(temp_file.name)
@@ -258,7 +272,8 @@ class HeicToJpgService:
         try:
             with Image.open(source) as image:
                 converted = prepare_jpg_image(image)
-                exif = image.info.get("exif")
+                exif = output_exif_bytes(image)
+                icc_profile = image.info.get("icc_profile")
                 save_kwargs = {
                     "format": "JPEG",
                     "quality": JpgQuality(settings.jpg_quality).quality,
@@ -266,6 +281,8 @@ class HeicToJpgService:
                 }
                 if JpgQuality(settings.jpg_quality) == JpgQuality.MAXIMUM:
                     save_kwargs["subsampling"] = 0
+                if icc_profile:
+                    save_kwargs["icc_profile"] = icc_profile
                 if exif:
                     save_kwargs["exif"] = exif
                 try:
@@ -287,11 +304,18 @@ class HeicToJpgService:
 def prepare_jpg_image(image: Image.Image) -> Image.Image:
     oriented = ImageOps.exif_transpose(image)
     oriented.load()
-    if oriented.mode in {"RGBA", "LA"} or ("transparency" in oriented.info):
-        background = Image.new("RGB", oriented.size, (255, 255, 255))
-        alpha_source = oriented.convert("RGBA")
-        background.paste(alpha_source, mask=alpha_source.getchannel("A"))
-        return background
-    if oriented.mode != "RGB":
-        return oriented.convert("RGB")
-    return oriented.copy()
+    return flatten_to_white(oriented)
+
+
+def output_exif_bytes(image: Image.Image) -> bytes | None:
+    """The source EXIF for the JPG, minus Orientation: prepare_jpg_image already applied it.
+
+    Rebuilt from getexif() rather than copying info["exif"], whose raw bytes lack the
+    "Exif" header for WebP and would still carry the orientation for JPG/PNG/WebP sources.
+    """
+    try:
+        exif = image.getexif()
+        exif.pop(EXIF_ORIENTATION_TAG, None)
+        return exif.tobytes() if len(exif) else None
+    except Exception:
+        return None

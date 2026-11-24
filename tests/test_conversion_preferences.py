@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 
 from pdf_toolbox.core.conversion_preferences import (
-    HEIC_JPG_QUALITY_KEY,
+    CONVERT_TO_JPG_QUALITY_KEY,
     PDF_TO_IMAGE_FORMAT_KEY,
     PDF_TO_IMAGE_JPG_QUALITY_KEY,
     PDF_TO_IMAGE_RESOLUTION_KEY,
-    HeicPreferences,
+    ConvertToJpgPreferences,
     PdfToImagePreferences,
-    heic_preferences_from_values,
-    heic_preferences_to_values,
+    convert_to_jpg_preferences_from_values,
+    convert_to_jpg_preferences_to_values,
     pdf_to_image_preferences_from_values,
     pdf_to_image_preferences_to_values,
 )
@@ -31,8 +31,8 @@ def test_pdf_to_image_preferences_round_trip(preferences: PdfToImagePreferences)
 
 @pytest.mark.parametrize("quality", list(JpgQuality))
 def test_heic_preferences_round_trip(quality: JpgQuality) -> None:
-    preferences = HeicPreferences(quality)
-    assert heic_preferences_from_values(heic_preferences_to_values(preferences)) == preferences
+    preferences = ConvertToJpgPreferences(quality)
+    assert convert_to_jpg_preferences_from_values(convert_to_jpg_preferences_to_values(preferences)) == preferences
 
 
 @pytest.mark.parametrize(
@@ -60,4 +60,4 @@ def test_each_invalid_pdf_to_image_value_falls_back_on_its_own() -> None:
 
 @pytest.mark.parametrize("raw", [None, "", "Best quality", "maximum", 85, ["HIGH"]])
 def test_invalid_heic_quality_falls_back_to_default(raw: object) -> None:
-    assert heic_preferences_from_values({HEIC_JPG_QUALITY_KEY: raw}) == HeicPreferences()
+    assert convert_to_jpg_preferences_from_values({CONVERT_TO_JPG_QUALITY_KEY: raw}) == ConvertToJpgPreferences()
