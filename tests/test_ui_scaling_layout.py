@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QS
 
 from pdf_toolbox.app import ensure_window_starts_maximized
 from pdf_toolbox.ui.components.drop_area import EmptyState
-from pdf_toolbox.ui.image_to_jpg_page import ConvertToJpgPage
+from pdf_toolbox.ui.image_to_jpg_page import FORMAT_BADGES, ConvertToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui import main_window as main_window_module
 from pdf_toolbox.ui.main_window import MainWindow, effective_minimum_size
@@ -202,7 +202,7 @@ def test_every_page_fits_a_600px_tall_work_area(app: QApplication, page_type) ->
 
 def assert_empty_state_fits(state) -> None:
     """Every visible part of the empty state lies inside it, at full height, without overlapping."""
-    parts = [state.headline, state.hint, state.format_rows, state.format_note, state.button]
+    parts = [state.headline, state.hint, state.format_badges, state.format_note, state.button]
     visible = [part for part in parts if part is not None and part.isVisible()]
     previous_bottom = None
     for part in visible:
@@ -214,9 +214,21 @@ def assert_empty_state_fits(state) -> None:
             assert geometry.top() > previous_bottom, part.objectName()
         previous_bottom = geometry.bottom()
     assert state.button.width() >= state.button.sizeHint().width()
-    if state.format_rows is not None and state.format_rows.isVisible():
-        for row in state.format_rows.findChildren(QLabel, "FormatRow"):
-            assert row.height() >= row.heightForWidth(row.width())
+    if state.format_badges is not None and state.format_badges.isVisible():
+        assert_badges_fit(state.format_badges)
+
+
+def assert_badges_fit(container) -> None:
+    """Badges are equal-size, fully inside their container, large enough for their label, and apart."""
+    rects = [badge.geometry() for badge in container.badges]
+    assert len({(rect.width(), rect.height()) for rect in rects}) == 1
+    for badge, rect in zip(container.badges, rects):
+        assert container.rect().contains(rect), badge.label
+        natural = badge.natural_size()
+        assert rect.width() >= natural.width() and rect.height() >= natural.height(), badge.label
+    for first in range(len(rects)):
+        for second in range(first + 1, len(rects)):
+            assert not rects[first].intersects(rects[second])
 
 
 # The minimum window plus the desktop sizes used above; the screen-relative UI scale keeps the
@@ -232,7 +244,24 @@ def test_convert_to_jpg_empty_state_fits_without_clipping(app: QApplication, wid
 
     assert_empty_state_fits(state)
     if height >= 720:
-        assert state.format_rows.isVisible() and state.format_note.isVisible()
+        assert state.format_badges.isVisible() and state.format_note.isVisible()
+
+
+@pytest.mark.parametrize("extra_width,stacked", [(-1, True), (0, False)])
+def test_convert_to_jpg_badges_stack_only_when_the_row_does_not_fit(
+    app: QApplication, extra_width: int, stacked: bool
+) -> None:
+    state = EmptyState("Heading", "Hint", "Add", format_badges=FORMAT_BADGES, format_note="Note")
+    badges = state.format_badges
+    margins = state.layout().contentsMargins()
+    state.resize(badges.row_width() + extra_width + margins.left() + margins.right(), 1000)
+    state.show()
+    app.processEvents()
+
+    assert badges.is_stacked() is stacked
+    tops = {badge.geometry().top() for badge in badges.badges}
+    assert len(tops) == (len(badges.badges) if stacked else 1)
+    assert_empty_state_fits(state)
 
 
 def test_convert_to_jpg_empty_state_fits_at_page_minimum_size(app: QApplication) -> None:

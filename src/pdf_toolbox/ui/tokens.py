@@ -34,6 +34,11 @@ DANGER_TEXT = "#B91C1C"
 
 SHADOW_RGBA = (0, 0, 0, 14)  # soft drop shadow under page thumbnails
 
+# Format badges (Convert to JPG empty state): white text on each, contrast >= 4.5:1.
+BADGE_HEIC = "#2563EB"
+BADGE_WEBP = "#15803D"
+BADGE_PNG = "#C2410C"
+
 
 
 # ---------------------------------------------------------------- type
@@ -55,6 +60,7 @@ TYPE_BODY_STRONG = TextStyle(14, 600)  # body size, emphasised (file names)
 TYPE_FIELD_LABEL = TextStyle(13, 500)
 TYPE_CAPTION = TextStyle(12, 400)
 TYPE_BUTTON = TextStyle(14, 500)
+TYPE_BADGE = TextStyle(28, 700)  # large format name on a coloured badge
 
 
 # ---------------------------------------------------------------- spacing, radius, sizes

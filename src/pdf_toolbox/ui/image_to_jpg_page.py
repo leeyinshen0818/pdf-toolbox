@@ -49,7 +49,7 @@ from pdf_toolbox.ui.components.settings_panel import SettingsPanel
 from pdf_toolbox.ui.components.widgets import JPG_QUALITY_CHOICES, default_output_folder, enum_combo, labeled_control
 from pdf_toolbox.ui.threads import keep_alive_until_finished, thread_is_running
 from pdf_toolbox.ui.metrics import ROW_THUMBNAIL_IMAGE, file_row_size_hint
-from pdf_toolbox.ui.tokens import BORDER, CARD_BG, PAGE_BG, SPACE_16, SPACE_4, SPACE_8, TEXT_SECONDARY, WARNING_TEXT
+from pdf_toolbox.ui.tokens import BADGE_HEIC, BADGE_PNG, BADGE_WEBP, BORDER, CARD_BG, PAGE_BG, SPACE_16, SPACE_4, SPACE_8, TEXT_SECONDARY, WARNING_TEXT
 
 
 PHOTO_PATH_ROLE = Qt.UserRole + 40
@@ -67,11 +67,11 @@ CONVERSION_FAILED_MESSAGE = (
     "The photos could not be converted. Check that the files are still in their folder and that "
     "the output folder is available, then try again."
 )
-# Shown in the empty state, in plain language, for people who don't know the format names.
-FORMAT_ROWS = (
-    ("HEIC", "iPhone photos"),
-    ("WebP", "Images saved from websites or WhatsApp"),
-    ("PNG", "Screenshots and graphics with transparent backgrounds"),
+# Big colour badges in the empty state, so the accepted formats are easy to recognise.
+FORMAT_BADGES = (
+    ("HEIC", BADGE_HEIC),
+    ("WebP", BADGE_WEBP),
+    ("PNG", BADGE_PNG),
 )
 WORK_AREA_MIN_HEIGHT = 200  # list/preview areas shrink and scroll so the page fits 1366x768
 DECODE_READY = "ready"
@@ -298,7 +298,7 @@ class ConvertToJpgPage(ToolPage):
             "Add photos to convert into JPG",
             "Drag and drop photos here, or click Add Photos.",
             "Add Photos",
-            format_rows=FORMAT_ROWS,
+            format_badges=FORMAT_BADGES,
             format_note="Already JPG? No need to convert.",
         )
         self.empty_state.files_dropped.connect(self.add_dropped_files)
