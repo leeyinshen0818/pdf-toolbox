@@ -73,6 +73,20 @@ QLabel#CardTitle {{
     {_font(T.TYPE_SECTION_TITLE)}
 }}
 
+QLabel#FormatRow {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_BODY)}
+    background: transparent;
+    border: none;
+}}
+
+QLabel#FormatNote {{
+    color: {T.TEXT_SECONDARY};
+    {_font(T.TYPE_CAPTION)}
+    background: transparent;
+    border: none;
+}}
+
 QLabel#CardMeta,
 QLabel#ImageDimensions {{
     color: {T.TEXT_SECONDARY};
@@ -542,7 +556,8 @@ QScrollArea#SettingsScroll {{
 QScrollArea#SettingsScroll > QWidget > QWidget,
 QWidget#SettingsBody,
 QWidget#JobFooter,
-QWidget#EmptyState {{
+QWidget#EmptyState,
+QWidget#FormatRows {{
     background: transparent;
 }}
 

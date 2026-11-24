@@ -67,6 +67,12 @@ CONVERSION_FAILED_MESSAGE = (
     "The photos could not be converted. Check that the files are still in their folder and that "
     "the output folder is available, then try again."
 )
+# Shown in the empty state, in plain language, for people who don't know the format names.
+FORMAT_ROWS = (
+    ("HEIC", "iPhone photos"),
+    ("WebP", "Images saved from websites or WhatsApp"),
+    ("PNG", "Screenshots and graphics with transparent backgrounds"),
+)
 WORK_AREA_MIN_HEIGHT = 200  # list/preview areas shrink and scroll so the page fits 1366x768
 DECODE_READY = "ready"
 DECODE_FAILED = "failed"
@@ -290,8 +296,10 @@ class ConvertToJpgPage(ToolPage):
         self.stack = QStackedWidget()
         self.empty_state, empty = empty_drop_area(
             "Add photos to convert into JPG",
-            "Drag and drop HEIC, WebP or PNG photos here.",
+            "Drag and drop photos here, or click Add Photos.",
             "Add Photos",
+            format_rows=FORMAT_ROWS,
+            format_note="Already JPG? No need to convert.",
         )
         self.empty_state.files_dropped.connect(self.add_dropped_files)
         empty.action_requested.connect(self._choose_photos)

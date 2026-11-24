@@ -6,9 +6,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QScrollArea
 
 from pdf_toolbox.app import ensure_window_starts_maximized
+from pdf_toolbox.ui.components.drop_area import EmptyState
 from pdf_toolbox.ui.image_to_jpg_page import ConvertToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
 from pdf_toolbox.ui.main_window import MainWindow
@@ -197,3 +198,46 @@ def test_every_page_fits_a_600px_tall_work_area(app: QApplication, page_type) ->
     page = page_type()
 
     assert page.minimumSizeHint().height() <= 600
+
+def assert_empty_state_fits(state) -> None:
+    """Every visible part of the empty state lies inside it, at full height, without overlapping."""
+    parts = [state.headline, state.hint, state.format_rows, state.format_note, state.button]
+    visible = [part for part in parts if part is not None and part.isVisible()]
+    previous_bottom = None
+    for part in visible:
+        geometry = part.geometry()
+        assert state.rect().contains(geometry), part.objectName()
+        needed = part.heightForWidth(geometry.width()) if part.hasHeightForWidth() else part.sizeHint().height()
+        assert geometry.height() >= needed, part.objectName()
+        if previous_bottom is not None:
+            assert geometry.top() > previous_bottom, part.objectName()
+        previous_bottom = geometry.bottom()
+    assert state.button.width() >= state.button.sizeHint().width()
+    if state.format_rows is not None and state.format_rows.isVisible():
+        for row in state.format_rows.findChildren(QLabel, "FormatRow"):
+            assert row.height() >= row.heightForWidth(row.width())
+
+
+# The minimum window plus the desktop sizes used above; the screen-relative UI scale keeps the
+# logical window at or above these sizes at 100%/125%/150% Windows scaling.
+@pytest.mark.parametrize("width,height", [(960, 640), (1280, 720), (1366, 768), (1920, 1080), (2560, 1440)])
+def test_convert_to_jpg_empty_state_fits_without_clipping(app: QApplication, width: int, height: int) -> None:
+    window = MainWindow()
+    window.resize(width, height)
+    window.stack.setCurrentIndex(3)
+    window.show()
+    app.processEvents()
+    state = window.stack.widget(3).empty_state.findChild(EmptyState)
+
+    assert_empty_state_fits(state)
+    if height >= 720:
+        assert state.format_rows.isVisible() and state.format_note.isVisible()
+
+
+def test_convert_to_jpg_empty_state_fits_at_page_minimum_size(app: QApplication) -> None:
+    page = ConvertToJpgPage()
+    page.resize(page.minimumSizeHint())
+    page.show()
+    app.processEvents()
+
+    assert_empty_state_fits(page.empty_state.findChild(EmptyState))
