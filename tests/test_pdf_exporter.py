@@ -262,6 +262,40 @@ def test_transparent_png_is_flattened_onto_white(tmp_path: Path) -> None:
         assert_close_color(sample_page(document[0], 0.75), (255, 255, 255))
 
 
+def test_transparent_webp_is_flattened_onto_white(tmp_path: Path) -> None:
+    # Transparent pixels are black underneath, so dropping alpha instead of flattening would show black.
+    image = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+    image.paste((255, 0, 0, 255), (0, 0, 100, 200))
+    source = tmp_path / "transparent.webp"
+    image.save(source, format="WEBP", lossless=True)
+    output = tmp_path / "transparent.pdf"
+
+    PdfExporter().export(entries_for([source]), output)
+
+    with pymupdf.open(output) as document:
+        assert_close_color(sample_page(document[0], 0.25), (255, 0, 0))
+        assert_close_color(sample_page(document[0], 0.75), (255, 255, 255))
+
+
+def test_webp_exif_orientation_is_applied_once(tmp_path: Path) -> None:
+    # 300x100, red left / blue right; Orientation 6 = rotate 90 degrees clockwise to view.
+    source = make_split_image(tmp_path / "split.png")
+    rotated = tmp_path / "rotated.webp"
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    with Image.open(source) as image:
+        image.save(rotated, format="WEBP", lossless=True, exif=exif.tobytes())
+    output = tmp_path / "rotated.pdf"
+
+    PdfExporter().export(entries_for([rotated]), output)
+
+    with pymupdf.open(output) as document:
+        page = document[0]
+        assert embedded_image_size(page) == (100, 300)
+        assert_close_color(sample_page(page, 0.5, 0.25), (255, 0, 0))
+        assert_close_color(sample_page(page, 0.5, 0.75), (0, 0, 255))
+
+
 def test_tone_correction_is_applied_to_export(tmp_path: Path) -> None:
     image = make_rgb(tmp_path / "dim.png", size=(100, 100), color=(90, 90, 90))
     output = tmp_path / "bright.pdf"

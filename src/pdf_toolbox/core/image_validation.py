@@ -6,7 +6,9 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+# Accepted extension -> the Pillow format the file's contents must actually be.
+IMAGE_FORMATS_BY_EXTENSION = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG", ".webp": "WEBP"}
+SUPPORTED_EXTENSIONS = set(IMAGE_FORMATS_BY_EXTENSION)
 EXIF_ORIENTATION_TAG = 0x0112
 # EXIF orientations 5-8 rotate the image by 90 or 270 degrees, swapping width and height.
 TRANSPOSING_ORIENTATIONS = {5, 6, 7, 8}
@@ -49,8 +51,9 @@ def validate_image_file(path: str | Path) -> ImageInfo:
         raise ImageValidationError("Path is not a file.")
 
     extension = image_path.suffix.lower()
-    if extension not in SUPPORTED_EXTENSIONS:
-        raise ImageValidationError("Unsupported file type. Use JPG, JPEG, or PNG.")
+    expected_format = IMAGE_FORMATS_BY_EXTENSION.get(extension)
+    if expected_format is None:
+        raise ImageValidationError("Unsupported file type. Use JPG, JPEG, PNG or WebP.")
 
     # Header + EXIF only: no pixel data is decoded here. Damaged pixel data surfaces later,
     # when the thumbnail, preview, or export decodes the file.
@@ -64,9 +67,8 @@ def validate_image_file(path: str | Path) -> ImageInfo:
     if width <= 0 or height <= 0:
         raise ImageValidationError("Image has invalid dimensions.")
 
-    expected_format = "JPEG" if extension in {".jpg", ".jpeg"} else "PNG"
     if image_format != expected_format:
-        raise ImageValidationError("This file is not a supported JPG, JPEG, or PNG image.")
+        raise ImageValidationError("This file is not a supported JPG, JPEG, PNG or WebP image.")
 
     return ImageInfo(
         path=image_path,

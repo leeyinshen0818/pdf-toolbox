@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 from PySide6.QtCore import (
     QItemSelectionModel,
     QObject,
@@ -93,6 +93,9 @@ PATH_ROLE = Qt.UserRole + 1
 AUTO_ORIENTATION_LABEL = "Auto - Based on Image"
 PREVIEW_MAX_SIZE = (1100, 1100)
 PREVIEW_CACHE_ENTRIES = 10
+# Downsized, upright copies of the source, so a sharpness/tone change does not decode the file
+# again (WebP and PNG have no reduced-size decode, unlike JPEG's draft mode).
+PREVIEW_BASE_CACHE_ENTRIES = 4
 UNREADABLE_IMAGE_REASON = "This image could not be opened. The file may be damaged."
 EXPORT_FAILED_MESSAGE = (
     "The PDF could not be created. Check that the images are still in their folder and that "
@@ -474,7 +477,7 @@ class ExportWorker(QObject):
 
 class ImageToPdfPage(ToolPage):
     ACCEPTED_EXTENSIONS = frozenset(SUPPORTED_EXTENSIONS)
-    ACCEPTED_DESCRIPTION = "JPG, JPEG or PNG images"
+    ACCEPTED_DESCRIPTION = "JPG, PNG or WebP images"
 
     def __init__(self) -> None:
         super().__init__()
@@ -484,6 +487,7 @@ class ImageToPdfPage(ToolPage):
         self.preview_cache: LruCache[tuple[str, int, tuple[str, str]], tuple[QPixmap, tuple[int, int]]] = LruCache(
             PREVIEW_CACHE_ENTRIES
         )
+        self.preview_base_cache: LruCache[tuple[str, int], Image.Image] = LruCache(PREVIEW_BASE_CACHE_ENTRIES)
         self.thumbnail_cache: dict[tuple[str, int], QPixmap] = {}
         self.sharpness_buttons: dict[SharpnessPreset, QPushButton] = {}
         self.tone_buttons: dict[TonePreset, QPushButton] = {}
@@ -513,7 +517,7 @@ class ImageToPdfPage(ToolPage):
         self.stack = QStackedWidget()
         self.empty_state, empty = empty_drop_area(
             "Add images to create a PDF",
-            "Drag and drop JPG, JPEG, or PNG files here.",
+            "Drag and drop JPG, PNG or WebP images here.",
             "Add Images",
         )
         self.empty_state.files_dropped.connect(self.add_dropped_files)
@@ -672,7 +676,7 @@ class ImageToPdfPage(ToolPage):
         return section
 
     def _choose_images(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.jpeg *.png)")
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.jpeg *.png *.webp)")
         if files:
             self._add_images(files)
 
@@ -735,6 +739,15 @@ class ImageToPdfPage(ToolPage):
             return cached
 
         target = ROW_THUMBNAIL_IMAGE
+        if path.suffix.lower() == ".webp":
+            # Qt's WebP reader ignores EXIF orientation; decode it as the preview and export do.
+            image = self._pil_thumbnail_image(path, target * 2)
+            if image.isNull():
+                return None
+            pixmap = QPixmap.fromImage(image).scaled(target, target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.thumbnail_cache[cache_key] = pixmap
+            return pixmap
+
         reader = QImageReader(str(path))
         reader.setAutoTransform(True)
         raw_size = reader.size()
@@ -751,6 +764,16 @@ class ImageToPdfPage(ToolPage):
         pixmap = QPixmap.fromImage(image).scaled(target, target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.thumbnail_cache[cache_key] = pixmap
         return pixmap
+
+    def _pil_thumbnail_image(self, path: Path, size: int) -> QImage:
+        try:
+            with Image.open(path) as image:
+                image.thumbnail((size, size), Image.Resampling.LANCZOS)
+                oriented = ImageOps.exif_transpose(image)
+            return self._pil_to_qimage(flatten_to_white(oriented))
+        except Exception:
+            logger.warning("Thumbnail could not be decoded: %s", path, exc_info=True)
+            return QImage()
 
     def _sync_list_from_collection(self) -> None:
         selected_paths = {item.data(PATH_ROLE) for item in self.image_list.selectedItems()}
@@ -819,6 +842,7 @@ class ImageToPdfPage(ToolPage):
         self.collection.clear()
         self.image_list.clear()
         self.preview_cache.clear()
+        self.preview_base_cache.clear()
         self.thumbnail_cache.clear()
         self.status_label.setText("Image list cleared.")
         self._update_state()
@@ -1096,10 +1120,15 @@ class ImageToPdfPage(ToolPage):
         # Orientation-corrected full size from validation drives the page layout; the pixels
         # are shrunk first (JPEG draft decode) and corrections run on the small image.
         source_size = (entry.width, entry.height)
-        with Image.open(entry.path) as image:
-            image.draft("RGB", PREVIEW_MAX_SIZE)
-            image.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS)
-            corrected = apply_corrections(image, entry.corrections)
+        base_key = (str(entry.path), stat.st_mtime_ns)
+        base = self.preview_base_cache.get(base_key)
+        if base is None:
+            with Image.open(entry.path) as image:
+                image.draft("RGB", PREVIEW_MAX_SIZE)
+                image.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS)
+                base = ImageOps.exif_transpose(image)
+            self.preview_base_cache[base_key] = base
+        corrected = apply_corrections(base, entry.corrections)
         flattened = flatten_to_white(corrected)
         qimage = self._pil_to_qimage(flattened)
         pixmap = QPixmap.fromImage(qimage)

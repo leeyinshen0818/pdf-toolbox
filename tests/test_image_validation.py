@@ -20,6 +20,7 @@ def make_image(path: Path, mode: str = "RGB", color=(255, 0, 0)) -> Path:
         ("photo.jpg", "JPEG"),
         ("photo.jpeg", "JPEG"),
         ("photo.png", "PNG"),
+        ("photo.webp", "WEBP"),
     ],
 )
 def test_supported_image_types_are_accepted(tmp_path: Path, filename: str, expected_format: str) -> None:
@@ -37,6 +38,14 @@ def test_unsupported_files_are_rejected(tmp_path: Path) -> None:
     path.write_text("not an image", encoding="utf-8")
 
     with pytest.raises(ImageValidationError, match="Unsupported file type"):
+        validate_image_file(path)
+
+
+def test_png_saved_as_webp_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "fake.webp"
+    Image.new("RGB", (12, 8)).save(path, format="PNG")
+
+    with pytest.raises(ImageValidationError, match="not a supported"):
         validate_image_file(path)
 
 
