@@ -5,14 +5,15 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QScrollArea
 
 from pdf_toolbox.app import ensure_window_starts_maximized
 from pdf_toolbox.ui.components.drop_area import EmptyState
 from pdf_toolbox.ui.image_to_jpg_page import ConvertToJpgPage
 from pdf_toolbox.ui.image_to_pdf_page import ImageToPdfPage
-from pdf_toolbox.ui.main_window import MainWindow
+from pdf_toolbox.ui import main_window as main_window_module
+from pdf_toolbox.ui.main_window import MainWindow, effective_minimum_size
 from pdf_toolbox.ui.pdf_organizer_page import PdfOrganizerPage
 from pdf_toolbox.ui.pdf_to_image_page import PdfToImagePage
 
@@ -241,3 +242,37 @@ def test_convert_to_jpg_empty_state_fits_at_page_minimum_size(app: QApplication)
     app.processEvents()
 
     assert_empty_state_fits(page.empty_state.findChild(EmptyState))
+
+
+def test_window_minimum_fits_every_page_without_overlapping_panels(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The offscreen test screen is 800x800; give the window a 4K work area so the clamp stays out of the way.
+    monkeypatch.setattr(main_window_module, "available_screen_size", lambda _window: QSize(3840, 2160))
+    window = MainWindow()
+    window.show()
+    app.processEvents()
+
+    for index, page in enumerate(window._pages()):
+        window.stack.setCurrentIndex(index)
+        app.processEvents()
+        window.resize(window.minimumSize())
+        app.processEvents()
+
+        sidebar = effective_minimum_size(window.sidebar)
+        page_minimum = effective_minimum_size(page)
+        assert window.minimumWidth() >= sidebar.width() + page_minimum.width()
+        assert window.minimumHeight() >= max(sidebar.height(), page_minimum.height())
+        assert page.width() >= page_minimum.width() and page.height() >= page_minimum.height()
+
+        layout = page.content_layout
+        panels = [layout.itemAt(i).widget() for i in range(layout.count()) if layout.itemAt(i).widget() is not None]
+        rects = [QRect(panel.mapTo(page, QPoint(0, 0)), panel.size()) for panel in panels if panel.isVisible()]
+        for panel, rect in zip(panels, rects):
+            assert page.rect().contains(rect), type(page).__name__
+            assert panel.width() >= effective_minimum_size(panel).width(), type(page).__name__
+        for first in range(len(rects)):
+            for second in range(first + 1, len(rects)):
+                assert not rects[first].intersects(rects[second]), type(page).__name__
+        if isinstance(page, ConvertToJpgPage):
+            assert_empty_state_fits(page.empty_state.findChild(EmptyState))

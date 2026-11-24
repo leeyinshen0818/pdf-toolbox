@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from PySide6.QtCore import QElapsedTimer, QEventLoop, QSize, QThread
+from PySide6.QtCore import QElapsedTimer, QEvent, QEventLoop, QSize, QThread
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -35,6 +35,23 @@ from pdf_toolbox.ui.tokens import ICON_SIDEBAR, PRIMARY, SPACE_8, SPACE_12, SPAC
 
 logger = logging.getLogger(__name__)
 CANCEL_WAIT_TIMEOUT_MS = 15_000
+DEFAULT_WINDOW_SIZE = QSize(1040, 720)
+
+
+def available_screen_size(window: QWidget) -> QSize | None:
+    """Logical size of the work area (screen minus taskbar) of the screen the window is on."""
+    screen = window.screen()
+    return screen.availableGeometry().size() if screen is not None else None
+
+
+def effective_minimum_size(widget: QWidget) -> QSize:
+    """The minimum a layout gives this widget: its explicit minimum where set, else its minimum size hint."""
+    explicit = widget.minimumSize()
+    hint = widget.minimumSizeHint()
+    return QSize(
+        explicit.width() if explicit.width() > 0 else max(0, hint.width()),
+        explicit.height() if explicit.height() > 0 else max(0, hint.height()),
+    )
 
 
 def wait_until(predicate: Callable[[], bool], timeout_ms: int | None = None) -> bool:
@@ -76,8 +93,7 @@ class MainWindow(QMainWindow):
         icon_path = app_icon_path()
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.resize(1040, 720)
-        self.setMinimumSize(960, 640)
+        self._screen_signal_connected = False
 
         root = QWidget()
         root.setObjectName("Root")
@@ -86,6 +102,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         sidebar = self._build_sidebar()
+        self.sidebar = sidebar
         self.stack = CurrentPageStack()
         self.image_to_pdf_page = ImageToPdfPage()
         self.pdf_to_image_page = PdfToImagePage()
@@ -104,6 +121,47 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_app_style())
         # Files dropped anywhere in the window go to the current page (same as its drop area).
         self.setAcceptDrops(True)
+        self.update_minimum_size()
+        initial = DEFAULT_WINDOW_SIZE.expandedTo(self.minimumSize())
+        available = available_screen_size(self)
+        self.resize(initial.boundedTo(available) if available is not None else initial)
+
+    # ---------------------------------------------------------------- minimum size
+    def layout_minimum_size(self) -> QSize:
+        """Sidebar plus the largest minimum of any page, so no page can be squeezed into overlapping."""
+        root_layout = self.centralWidget().layout()
+        margins = root_layout.contentsMargins()
+        sidebar = effective_minimum_size(self.sidebar)
+        pages = [effective_minimum_size(page) for page in self._pages()]
+        width = sidebar.width() + root_layout.spacing() + max(page.width() for page in pages)
+        height = max([sidebar.height()] + [page.height() for page in pages])
+        return QSize(width + margins.left() + margins.right(), height + margins.top() + margins.bottom())
+
+    def update_minimum_size(self) -> None:
+        """Apply the layout minimum, clamped so the window (frame included) never exceeds the screen."""
+        minimum = self.layout_minimum_size()
+        available = available_screen_size(self)
+        if available is not None:
+            frame = self.frameGeometry().size() - self.geometry().size() if self.isVisible() else QSize(0, 0)
+            minimum = minimum.boundedTo(available - frame)
+        if minimum != self.minimumSize():
+            self.setMinimumSize(minimum)
+
+    def event(self, event: QEvent) -> bool:
+        handled = super().event(event)
+        # Page minimums follow fonts, styles and visible controls; re-derive whenever layouts change.
+        if event.type() == QEvent.LayoutRequest:
+            self.update_minimum_size()
+        return handled
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and not self._screen_signal_connected:
+            # Moving to a screen with another size or DPI changes the clamp.
+            handle.screenChanged.connect(lambda _screen: self.update_minimum_size())
+            self._screen_signal_connected = True
+        self.update_minimum_size()
 
     def _pages(self) -> tuple:
         return (self.image_to_pdf_page, self.pdf_to_image_page, self.pdf_organizer_page, self.convert_to_jpg_page)
